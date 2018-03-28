@@ -105,14 +105,14 @@ public class AutograderMain {
                 System.out.println("Grade : " + nextRecord[2]);
 
                 System.out.println("==========================");
-                BufferedReader essayReader = Files.newBufferedReader(Paths.get("essays_dataset/essays/" + "990384.txt"));
+                BufferedReader essayReader = Files.newBufferedReader(Paths.get("essays_dataset/essays/" + nextRecord[0]));
                 StringBuilder essay = new StringBuilder();
                 String line;
                 while((line = essayReader.readLine()) != null){
                     essay.append(line).append("\n");
                 }
-                System.out.println(sentenceSplit(essay.toString()));
-                System.out.println(posTagging(essay.toString()));
+//                System.out.println(sentenceSplit(essay.toString()));
+//                System.out.println(posTagging(essay.toString()));
 
             }
 
