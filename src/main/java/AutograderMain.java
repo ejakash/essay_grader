@@ -10,6 +10,9 @@ import edu.stanford.nlp.ling.CoreAnnotations;
 import edu.stanford.nlp.ling.CoreLabel;
 import edu.stanford.nlp.pipeline.Annotation;
 import edu.stanford.nlp.pipeline.StanfordCoreNLP;
+import edu.stanford.nlp.semgraph.SemanticGraph;
+import edu.stanford.nlp.semgraph.SemanticGraphCoreAnnotations;
+import edu.stanford.nlp.trees.TypedDependency;
 import edu.stanford.nlp.util.CoreMap;
 
 import java.io.BufferedReader;
@@ -24,6 +27,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Properties;
 import java.util.stream.Collectors;
+import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 public class AutograderMain {
 
@@ -38,75 +44,54 @@ public class AutograderMain {
         if(url != null)dictionary = new Dictionary(url);
     }
 
-    public static List<String> tokenize(String text) {
-        Properties props = new Properties();
-        props.setProperty("annotators", "tokenize");
-        StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
+       public static int getLengthScore(Annotation document) {
+        int sentenceCount = 0;
+        String[] sepArr = {"CC", "IN", ",", "WRB", "WDT", "WP", "WP$"};
+        for (CoreMap sentence : document.get(CoreAnnotations.SentencesAnnotation.class)) {
+            SemanticGraph dependencyParse =
+                    sentence.get(SemanticGraphCoreAnnotations.BasicDependenciesAnnotation.class);
 
-        // create an empty Annotation just with the given text
-        Annotation document = new Annotation(text);
-
-        // run all Annotators on this text
-        pipeline.annotate(document);
-        List<CoreLabel> tokens = document.get(CoreAnnotations.TokensAnnotation.class);
-
-        List<String> result = new ArrayList<>();
-        for (CoreLabel token : tokens) {
-            // this is the text of the token
-            String word = token.get(CoreAnnotations.TextAnnotation.class);
-            result.add(word);
-        }
-
-        return result;
-    }
-
-    public static List<String> sentenceSplit(String text) {
-        Properties props = new Properties();
-        props.setProperty("annotators", "tokenize, ssplit");
-        StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
-
-        // create an empty Annotation just with the given text
-        Annotation document = new Annotation(text);
-
-        // run all Annotators on this text
-        pipeline.annotate(document);
-        List<CoreMap> sentences = document.get(CoreAnnotations.SentencesAnnotation.class);
-
-        List<String> result = new ArrayList<>();
-        for (CoreMap sentence : sentences) {
-            String sentenceString = sentence.get(CoreAnnotations.TextAnnotation.class);
-            result.add(sentenceString);
-
-            // see tokenize(String) method
-            List<CoreLabel> tokens = sentence.get(CoreAnnotations.TokensAnnotation.class);
-            for (CoreLabel token : tokens) {
-                String word = token.get(CoreAnnotations.TextAnnotation.class);
+            int sentenceSplitCount = 0;
+            List<Integer> subjIndexList = new ArrayList<>();
+            for (TypedDependency t : dependencyParse.typedDependencies()) {
+                if (t.reln().toString().contains("subj")) {
+                    String s = t.dep().originalText();
+                    if (Character.isUpperCase(s.charAt(0))) {
+                        subjIndexList.add(t.dep().index());
+                    }
+                }
+            }
+            List<String> posList = sentence.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.PartOfSpeechAnnotation.class)).collect(Collectors.toList());
+            Collections.sort(subjIndexList);
+            if (subjIndexList.size() > 1) {
+                for (int i = 1; i < subjIndexList.size(); i++) {
+                    int sepCount = (int) IntStream.range(subjIndexList.get(i - 1), subjIndexList.get(i))
+                            .filter(k -> (Arrays.asList(sepArr).contains(posList.get(k - 1)))).count();
+                    if (sepCount == 0) {
+                        sentenceSplitCount++;
+                    }
+                }
+            }
+            if (sentenceSplitCount > 1) {
+                sentenceCount += sentenceSplitCount;
+            } else {
+                sentenceCount++;
             }
         }
-
-        return result;
-    }
-
-    public static List<String> posTagging(String text) {
-        Properties props = new Properties();
-        props.setProperty("annotators", "tokenize, ssplit, pos");
-        StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
-
-        // create an empty Annotation just with the given text
-        Annotation document = new Annotation(text);
-
-        // run all Annotators on this text
-        pipeline.annotate(document);
-        List<CoreLabel> tokens = document.get(CoreAnnotations.TokensAnnotation.class);
-
-        List<String> result = new ArrayList<>();
-        for (CoreLabel token : tokens) {
-            // this is the text of the token
-            String pos = token.get(CoreAnnotations.PartOfSpeechAnnotation.class);
-            result.add(token + "/" + pos);
+        int lengthScore = 1;
+        if (sentenceCount >= 10) {
+            lengthScore++;
         }
-
-        return result;
+        if (sentenceCount >= 13) {
+            lengthScore++;
+        }
+        if (sentenceCount >= 16) {
+            lengthScore++;
+        }
+        if (sentenceCount >= 20) {
+            lengthScore++;
+        }
+        return lengthScore;
     }
 
     public static void main(String[] args) {
@@ -114,28 +99,27 @@ public class AutograderMain {
             Reader reader = Files.newBufferedReader(Paths.get("essays_dataset/index.csv"));
             CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build();
             CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(csvParser).withSkipLines(1).build();
-            // Reading Records One by One in a String array
             String[] nextRecord;
-            int count = 0;
-            while ((nextRecord = csvReader.readNext()) != null) {
-                System.out.println("Index : " + ++count);
-                System.out.println("Filename : " + nextRecord[0]);
-                System.out.println("Prompt : " + nextRecord[1]);
-                System.out.println("Grade : " + nextRecord[2]);
 
-                System.out.println("==========================");
+            Properties props = new Properties();
+            props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
+            StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
+
+
+            while ((nextRecord = csvReader.readNext()) != null) {
                 BufferedReader essayReader = Files.newBufferedReader(Paths.get("essays_dataset/essays/" + nextRecord[0]));
                 StringBuilder essay = new StringBuilder();
                 String line;
-                while((line = essayReader.readLine()) != null){
+                while ((line = essayReader.readLine()) != null) {
                     essay.append(line).append("\n");
                 }
-//                System.out.println(sentenceSplit(essay.toString()));
-//                System.out.println(posTagging(essay.toString()));
+
+                Annotation document = new Annotation(essay.toString());
+                pipeline.annotate(document);
+                int lengthScore = getLengthScore(document);
+                //System.out.println(lengthScore + "\t" + nextRecord[2]);
 
             }
-
-
         } catch (IOException e) {
             e.printStackTrace();
         }
