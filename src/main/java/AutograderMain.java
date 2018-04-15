@@ -95,10 +95,25 @@ public class AutograderMain {
         return lengthScore;
     }
 
-    private static double spellCheck(Annotation document) {
+    private static int spellCheck(Annotation document) {
         List<String> tokenLemma = document.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.LemmaAnnotation.class)).collect(Collectors.toList());
-        Long correctCount = tokenLemma.stream().filter(AutograderMain::isCorrect).count();//TODO change to wrong count
-        return (double) correctCount / tokenLemma.size() * 4;//TODO scale to (low misspells)0,1,2,3,4(high misspells)
+        Long correctCount = tokenLemma.stream().filter(AutograderMain::isCorrect).count();
+        double spellRatio = (1 - (double) correctCount / tokenLemma.size());
+        int spellScore = 0;
+        if (spellRatio >= 0.01) {
+            spellScore++;
+        }
+        if (spellRatio >= 0.022) {
+            spellScore++;
+        }
+        if (spellRatio >= 0.033) {
+            spellScore++;
+        }
+        if (spellRatio >= 0.088) {
+            spellScore++;
+        }
+        return spellScore;
+
     }
 
     private static boolean isCorrect(String text) {
@@ -153,7 +168,15 @@ public class AutograderMain {
                     return false;
                 }
             }else{
-                return false;
+                if (nounSgPos.contains(posList.get(subjIndBefVerbList.get(0)))){
+                    return true;
+                }else if(posList.get(subjIndBefVerbList.get(0)).equals("PRP")){
+                    if(!firstPersSg.contains(wordList.get(subjIndBefVerbList.get(0)))){
+                        return true;
+                    }
+                }else{
+                    return false;
+                }
             }
 
         }
@@ -218,8 +241,8 @@ public class AutograderMain {
                 Annotation document = new Annotation(essay.toString());
                 pipeline.annotate(document);
                 int lengthScore = getLengthScore(document);
-                double spellScore = spellCheck(document);
-                int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);
+                int spellScore = spellCheck(document);
+//                int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);
                 System.out.println(lengthScore + "\t" + spellScore + "\t" + nextRecord[2]);
 
             }
