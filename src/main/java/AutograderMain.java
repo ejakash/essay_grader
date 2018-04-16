@@ -138,34 +138,39 @@ public class AutograderMain {
         return false;
     }
 
-    private static boolean isSubjListSglr(List<Integer> subjIndBefVerbList, List<String> posList, List<String> wordList, int vi) {
+    private static boolean isSubjListSglr(List<Integer> subjIndForVerbList, List<String> posList, List<String> wordList, int vi) {
         List<String> nounSgPos = Arrays.asList("NNP", "NN");
-        List<String> firstPersSg = Arrays.asList("I", "you", "You");
+        List<String> thirdPersSg = Arrays.asList("He", "She", "It", "he", "she", "it");
+        List<String> demonsDetSg = Arrays.asList("This", "That", "this", "that");
         List<String> orNor = Arrays.asList("or", "nor");
-        if (subjIndBefVerbList.size() == 1) {
-            if (nounSgPos.contains(posList.get(subjIndBefVerbList.get(0)))) {
+        if (subjIndForVerbList.size() == 1) {
+            if (nounSgPos.contains(posList.get(subjIndForVerbList.get(0)))) {
                 return true;
-            } else if (posList.get(subjIndBefVerbList.get(0)).equals("PRP")) {
-                if (!firstPersSg.contains(wordList.get(subjIndBefVerbList.get(0)))) {
+            } else if (posList.get(subjIndForVerbList.get(0)).equals("PRP")) {
+                if (thirdPersSg.contains(wordList.get(subjIndForVerbList.get(0)))) {
                     return true;
                 }
-            } else if (posList.get(subjIndBefVerbList.get(0)).equals("DT")) {
-                //check if word is sg
-                System.out.println();//TODO
-
+            } else if (posList.get(subjIndForVerbList.get(0)).equals("DT")) {
+                if (demonsDetSg.contains(wordList.get(subjIndForVerbList.get(0)))) {
+                    return true;
+                }
+            } else if (posList.get(subjIndForVerbList.get(0)).equals("CD")) {
+                if (wordList.get(subjIndForVerbList.get(0)).toLowerCase().equals("one")) {
+                    return true;
+                }
             } else {
                 return false;
             }
-        } else if (subjIndBefVerbList.size() > 1) {
-            int andCount = (int) IntStream.range(subjIndBefVerbList.get(0), vi).filter(k -> wordList.get(k).equals("and")).count();
-            int orNorCount = (int) IntStream.range(subjIndBefVerbList.get(0), vi).filter(k -> orNor.contains(wordList.get(k))).count();
+        } else if (subjIndForVerbList.size() > 1) {
+            int andCount = (int) IntStream.range(subjIndForVerbList.get(0), vi).filter(k -> wordList.get(k).equals("and")).count();
+            int orNorCount = (int) IntStream.range(subjIndForVerbList.get(0), vi).filter(k -> orNor.contains(wordList.get(k))).count();
             if (andCount >= 1) {
                 return false;
             } else if (orNorCount >= 1) {
-                if (nounSgPos.contains(posList.get(subjIndBefVerbList.get(subjIndBefVerbList.size() - 1)))) {
+                if (nounSgPos.contains(posList.get(subjIndForVerbList.get(subjIndForVerbList.size() - 1)))) {
                     return true;
-                } else if (posList.get(subjIndBefVerbList.get(subjIndBefVerbList.size() - 1)).equals("PRP")) {
-                    if (!firstPersSg.contains(wordList.get(subjIndBefVerbList.get(subjIndBefVerbList.size() - 1)))) {
+                } else if (posList.get(subjIndForVerbList.get(subjIndForVerbList.size() - 1)).equals("PRP")) {
+                    if (thirdPersSg.contains(wordList.get(subjIndForVerbList.get(subjIndForVerbList.size() - 1)))) {
                         return true;
                     }
                 } else {
@@ -233,24 +238,23 @@ public class AutograderMain {
                 verbSubjSetMap.put(verbIndex, subjIndForVerbSet);
             }
 
-        for (Map.Entry<Integer, Set<Integer>> entry : verbSubjSetMap.entrySet())
-        {
-            int vi = entry.getKey();
-            List<Integer> subjIndBefVerbList = new ArrayList<>(entry.getValue());
-            Collections.sort(subjIndBefVerbList);
-            if (posList.get(vi).equals("VB") || posList.get(vi).equals("VBP")) {
-                if (isSubjListSglr(subjIndBefVerbList, posList, wordList, vi)) {
-                    mistakeCount++;
-                }
-            } else if (posList.get(vi).equals("VBZ")) {
-                if (!isSubjListSglr(subjIndBefVerbList, posList, wordList, vi)) {
-                    mistakeCount++;
+            for (Map.Entry<Integer, Set<Integer>> entry : verbSubjSetMap.entrySet()) {
+                int vi = entry.getKey();
+                List<Integer> subjIndForVerbList = new ArrayList<>(entry.getValue());
+                Collections.sort(subjIndForVerbList);
+                if (posList.get(vi).equals("VB") || posList.get(vi).equals("VBP")) {
+                    if (isSubjListSglr(subjIndForVerbList, posList, wordList, vi)) {
+                        mistakeCount++;
+                    }
+                } else if (posList.get(vi).equals("VBZ")) {
+                    if (!isSubjListSglr(subjIndForVerbList, posList, wordList, vi)) {
+                        mistakeCount++;
+                    }
                 }
             }
         }
+        return ((double) mistakeCount) / docTokenList.size();
     }
-        return((double)mistakeCount)/docTokenList.size();
-}
 
     public static void main1(String[] args) {
         try {
@@ -289,8 +293,8 @@ public class AutograderMain {
         Properties props = new Properties();
         props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
         StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
-//        String doc = "John or Jane eats food and drinks milk.";
-        String doc = "Another is on the way.";
+        String doc = "John or Jane eats food and drinks milk.";
+//        String doc = "Another is on the way.";
 //        String doc = "Anyone who sees his or her friends runs to greet them.";
         Annotation document = new Annotation(doc);
         pipeline.annotate(document);
