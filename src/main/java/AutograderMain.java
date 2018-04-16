@@ -173,6 +173,14 @@ public class AutograderMain {
                     if (thirdPersSg.contains(wordList.get(subjIndForVerbList.get(subjIndForVerbList.size() - 1)))) {
                         return true;
                     }
+                } else if (posList.get(subjIndForVerbList.get(0)).equals("DT")) {
+                    if (demonsDetSg.contains(wordList.get(subjIndForVerbList.get(0)))) {
+                        return true;
+                    }
+                } else if (posList.get(subjIndForVerbList.get(0)).equals("CD")) {
+                    if (wordList.get(subjIndForVerbList.get(0)).toLowerCase().equals("one")) {
+                        return true;
+                    }
                 } else {
                     return false;
                 }
@@ -185,7 +193,6 @@ public class AutograderMain {
 
     private static double getSubjectVerbAgrmntScore(Annotation document) {
         List<String> verbPos = Arrays.asList("VB", "VBP", "VBZ");
-        List<String> subjPos = Arrays.asList("NNP", "PRP", "NN", "NNPS", "NNS");
         int mistakeCount = 0;
         List<String> docTokenList = document.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.TextAnnotation.class)).collect(Collectors.toList());
         for (CoreMap sentence : document.get(CoreAnnotations.SentencesAnnotation.class)) {
@@ -256,7 +263,7 @@ public class AutograderMain {
         return ((double) mistakeCount) / docTokenList.size();
     }
 
-    public static void main1(String[] args) {
+    public static void main(String[] args) {
         try {
             Reader reader = Files.newBufferedReader(Paths.get("input/training/index.csv"));
             CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build();
@@ -289,11 +296,11 @@ public class AutograderMain {
         }
     }
 
-    public static void main(String[] args) {
+    public static void main1(String[] args) {
         Properties props = new Properties();
         props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
         StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
-        String doc = "John or Jane eats food and drinks milk.";
+        String doc = "John or Jane eat food.";
 //        String doc = "Another is on the way.";
 //        String doc = "Anyone who sees his or her friends runs to greet them.";
         Annotation document = new Annotation(doc);
@@ -306,7 +313,7 @@ public class AutograderMain {
             System.out.println(t.gov() + " " + t.reln() + " " + t.dep() + " " + t.dep().index());
         }
 
-        getSubjectVerbAgrmntScore(document);
+        System.out.println(getSubjectVerbAgrmntScore(document));
 
     }
 
