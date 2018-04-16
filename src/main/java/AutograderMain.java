@@ -45,6 +45,14 @@ public class AutograderMain {
         if (url != null) dictionary = new Dictionary(url);
     }
 
+    private static <N extends Number> int findIntervalIndex(Number searchValue, List<N> intervals) {
+        for (int i = 0; i < intervals.size() - 1; i++) {
+            if ((double) intervals.get(i) <= (double) searchValue && (double) intervals.get(i + 1) > (double) searchValue)
+                return i;
+        }
+        return intervals.size() - 1;
+    }
+
     private static int getLengthScore(Annotation document) {
         int sentenceCount = 0;
         String[] sepArr = {"CC", "IN", ",", "WRB", "WDT", "WP", "WP$"};
@@ -79,40 +87,18 @@ public class AutograderMain {
                 sentenceCount++;
             }
         }
-        int lengthScore = 1;
-        if (sentenceCount >= 10) {
-            lengthScore++;
-        }
-        if (sentenceCount >= 13) {
-            lengthScore++;
-        }
-        if (sentenceCount >= 16) {
-            lengthScore++;
-        }
-        if (sentenceCount >= 20) {
-            lengthScore++;
-        }
-        return lengthScore;
+
+        List<Integer> values = Arrays.asList(0, 10, 13, 16, 20);
+        return findIntervalIndex(sentenceCount, values) + 1;
+
     }
 
     private static int spellCheck(Annotation document) {
         List<String> tokenLemma = document.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.LemmaAnnotation.class)).collect(Collectors.toList());
         Long correctCount = tokenLemma.stream().filter(AutograderMain::isCorrect).count();
         double spellRatio = (1 - (double) correctCount / tokenLemma.size());
-        int spellScore = 0;
-        if (spellRatio >= 0.01) {
-            spellScore++;
-        }
-        if (spellRatio >= 0.022) {
-            spellScore++;
-        }
-        if (spellRatio >= 0.033) {
-            spellScore++;
-        }
-        if (spellRatio >= 0.088) {
-            spellScore++;
-        }
-        return spellScore;
+        List<Double> values = Arrays.asList(0D, 0.01, 0.022, 0.033, 0.088);
+        return findIntervalIndex(spellRatio, values);
 
     }
 
@@ -147,20 +133,11 @@ public class AutograderMain {
             if (nounSgPos.contains(posList.get(subjIndForVerbList.get(0)))) {
                 return true;
             } else if (posList.get(subjIndForVerbList.get(0)).equals("PRP")) {
-                if (thirdPersSg.contains(wordList.get(subjIndForVerbList.get(0)))) {
-                    return true;
-                }
+                return thirdPersSg.contains(wordList.get(subjIndForVerbList.get(0)));
             } else if (posList.get(subjIndForVerbList.get(0)).equals("DT")) {
-                if (demonsDetSg.contains(wordList.get(subjIndForVerbList.get(0)))) {
-                    return true;
-                }
-            } else if (posList.get(subjIndForVerbList.get(0)).equals("CD")) {
-                if (wordList.get(subjIndForVerbList.get(0)).toLowerCase().equals("one")) {
-                    return true;
-                }
-            } else {
-                return false;
-            }
+                return demonsDetSg.contains(wordList.get(subjIndForVerbList.get(0)));
+            } else
+                return posList.get(subjIndForVerbList.get(0)).equals("CD") && wordList.get(subjIndForVerbList.get(0)).toLowerCase().equals("one");
         } else if (subjIndForVerbList.size() > 1) {
             int andCount = (int) IntStream.range(subjIndForVerbList.get(0), vi).filter(k -> wordList.get(k).equals("and")).count();
             int orNorCount = (int) IntStream.range(subjIndForVerbList.get(0), vi).filter(k -> orNor.contains(wordList.get(k))).count();
@@ -170,24 +147,15 @@ public class AutograderMain {
                 if (nounSgPos.contains(posList.get(subjIndForVerbList.get(subjIndForVerbList.size() - 1)))) {
                     return true;
                 } else if (posList.get(subjIndForVerbList.get(subjIndForVerbList.size() - 1)).equals("PRP")) {
-                    if (thirdPersSg.contains(wordList.get(subjIndForVerbList.get(subjIndForVerbList.size() - 1)))) {
-                        return true;
-                    }
+                    return thirdPersSg.contains(wordList.get(subjIndForVerbList.get(subjIndForVerbList.size() - 1)));
                 } else if (posList.get(subjIndForVerbList.get(0)).equals("DT")) {
-                    if (demonsDetSg.contains(wordList.get(subjIndForVerbList.get(0)))) {
-                        return true;
-                    }
-                } else if (posList.get(subjIndForVerbList.get(0)).equals("CD")) {
-                    if (wordList.get(subjIndForVerbList.get(0)).toLowerCase().equals("one")) {
-                        return true;
-                    }
-                } else {
-                    return false;
-                }
+                    return demonsDetSg.contains(wordList.get(subjIndForVerbList.get(0)));
+                } else
+                    return posList.get(subjIndForVerbList.get(0)).equals("CD") && wordList.get(subjIndForVerbList.get(0)).toLowerCase().equals("one");
             }
 
         }
-        return true;
+        return false;//Find the success
 
     }
 
@@ -199,23 +167,6 @@ public class AutograderMain {
             List<String> wordList = sentence.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.TextAnnotation.class)).collect(Collectors.toList());
             List<String> posList = sentence.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.PartOfSpeechAnnotation.class)).collect(Collectors.toList());
             List<Integer> verbIndexList = IntStream.range(0, posList.size()).filter(i -> verbPos.contains(posList.get(i))).boxed().collect(Collectors.toList());
-            System.out.println(verbIndexList);
-            /*int viStart = 0;
-            Map<Integer, List<Integer>> verbSubjListMap = new HashMap<>();
-            for (Integer viEnd : verbIndexList) {
-                List<Integer> subjIndBefVerbList = IntStream.range(viStart, viEnd).filter(k -> subjPos.contains(posList.get(k))).boxed().collect(Collectors.toList());
-                if (subjIndBefVerbList.size() == 0){
-                    if (posList.get(viEnd - 1).equals("DT")) {
-                        subjIndBefVerbList.add(viEnd - 1);
-                    }else if (posList.get(viEnd - 2).equals("DT")){
-                        subjIndBefVerbList.add(viEnd - 2);
-                    }
-                }
-
-                verbSubjListMap.put(viEnd, subjIndBefVerbList);
-                viStart = viEnd;
-            }*/
-
             Map<Integer, Set<Integer>> verbSubjSetMap = new HashMap<>();
             SemanticGraph dependencyParse = sentence.get(SemanticGraphCoreAnnotations.EnhancedPlusPlusDependenciesAnnotation.class);
             for (int verbIndex : verbIndexList) {
@@ -263,7 +214,7 @@ public class AutograderMain {
         return ((double) mistakeCount) / docTokenList.size();
     }
 
-    public static void main(String[] args) {
+    public static void main1(String[] args) {
         try {
             Reader reader = Files.newBufferedReader(Paths.get("input/training/index.csv"));
             CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build();
@@ -296,22 +247,31 @@ public class AutograderMain {
         }
     }
 
-    public static void main1(String[] args) {
+    public static void main(String[] args) throws IOException {
         Properties props = new Properties();
         props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
         StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
-        String doc = "John or Jane eat food.";
+//        String doc = "John or Jane eat food.";
 //        String doc = "Another is on the way.";
 //        String doc = "Anyone who sees his or her friends runs to greet them.";
-        Annotation document = new Annotation(doc);
+        BufferedReader essayReader = Files.newBufferedReader(Paths.get("input/training/essays/937403.txt"));
+        StringBuilder essay = new StringBuilder();
+        String line;
+        while ((line = essayReader.readLine()) != null) {
+            essay.append(line).append("\n");
+        }
+//        Annotation document = new Annotation(doc);
+        Annotation document = new Annotation(essay.toString());
         pipeline.annotate(document);
         System.out.println(document);
-        List<CoreMap> sentence = document.get(CoreAnnotations.SentencesAnnotation.class);
-        System.out.println(sentence);
-        SemanticGraph dependencyParse = sentence.get(0).get(SemanticGraphCoreAnnotations.EnhancedPlusPlusDependenciesAnnotation.class);
-        for (TypedDependency t : dependencyParse.typedDependencies()) {
-            System.out.println(t.gov() + " " + t.reln() + " " + t.dep() + " " + t.dep().index());
-        }
+        List<CoreMap> sentenceList = document.get(CoreAnnotations.SentencesAnnotation.class);
+//        System.out.println(sentence);
+//        for (CoreMap sentence : sentenceList) {
+//            SemanticGraph dependencyParse = sentence.get(SemanticGraphCoreAnnotations.EnhancedPlusPlusDependenciesAnnotation.class);
+//            for (TypedDependency t : dependencyParse.typedDependencies()) {
+//                System.out.println(t.gov() + " " + t.reln() + " " + t.dep() + " " + t.dep().index());
+//            }
+//        }
 
         System.out.println(getSubjectVerbAgrmntScore(document));
 
