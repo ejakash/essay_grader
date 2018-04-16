@@ -57,7 +57,7 @@ public class AutograderMain {
             for (TypedDependency t : dependencyParse.typedDependencies()) {
                 if (t.reln().toString().contains("subj")) {
                     String s = t.dep().originalText();
-                    if (Character.isUpperCase(s.charAt(0))) {
+                    if (Character.isUpperCase(s.charAt(0))) { //TODO fail:John and <Jane/his dog> went for a walk Jack ate food.
                         subjIndexList.add(t.dep().index());
                     }
                 }
@@ -142,39 +142,33 @@ public class AutograderMain {
         List<String> nounSgPos = Arrays.asList("NNP", "NN");
         List<String> firstPersSg = Arrays.asList("I", "you", "You");
         List<String> orNor = Arrays.asList("or", "nor");
-        if (subjIndBefVerbList.size() == 1){
-            if (nounSgPos.contains(posList.get(subjIndBefVerbList.get(0)))){
+        if (subjIndBefVerbList.size() == 1) {
+            if (nounSgPos.contains(posList.get(subjIndBefVerbList.get(0)))) {
                 return true;
-            }else if(posList.get(subjIndBefVerbList.get(0)).equals("PRP")){
-                if(!firstPersSg.contains(wordList.get(subjIndBefVerbList.get(0)))){
+            } else if (posList.get(subjIndBefVerbList.get(0)).equals("PRP")) {
+                if (!firstPersSg.contains(wordList.get(subjIndBefVerbList.get(0)))) {
                     return true;
                 }
-            }else{
+            } else if (posList.get(subjIndBefVerbList.get(0)).equals("DT")) {
+                //check if word is sg
+                System.out.println();
+
+            } else {
                 return false;
             }
-        }else if(subjIndBefVerbList.size() > 1){
-            int andCount = (int)IntStream.range(subjIndBefVerbList.get(0), vi).filter(k -> wordList.get(k).equals("and")).count();
-            int orNorCount = (int)IntStream.range(subjIndBefVerbList.get(0), vi).filter(k -> orNor.contains(wordList.get(k))).count();
-            if (andCount >= 1){
+        } else if (subjIndBefVerbList.size() > 1) {
+            int andCount = (int) IntStream.range(subjIndBefVerbList.get(0), vi).filter(k -> wordList.get(k).equals("and")).count();
+            int orNorCount = (int) IntStream.range(subjIndBefVerbList.get(0), vi).filter(k -> orNor.contains(wordList.get(k))).count();
+            if (andCount >= 1) {
                 return false;
-            }else if (orNorCount >= 1){
-                if (nounSgPos.contains(posList.get(subjIndBefVerbList.get(subjIndBefVerbList.size() - 1)))){
+            } else if (orNorCount >= 1) {
+                if (nounSgPos.contains(posList.get(subjIndBefVerbList.get(subjIndBefVerbList.size() - 1)))) {
                     return true;
-                }else if(posList.get(subjIndBefVerbList.get(subjIndBefVerbList.size() - 1)).equals("PRP")){
-                    if(!firstPersSg.contains(wordList.get(subjIndBefVerbList.get(subjIndBefVerbList.size() - 1)))){
+                } else if (posList.get(subjIndBefVerbList.get(subjIndBefVerbList.size() - 1)).equals("PRP")) {
+                    if (!firstPersSg.contains(wordList.get(subjIndBefVerbList.get(subjIndBefVerbList.size() - 1)))) {
                         return true;
                     }
-                }else{
-                    return false;
-                }
-            }else{
-                if (nounSgPos.contains(posList.get(subjIndBefVerbList.get(0)))){
-                    return true;
-                }else if(posList.get(subjIndBefVerbList.get(0)).equals("PRP")){
-                    if(!firstPersSg.contains(wordList.get(subjIndBefVerbList.get(0)))){
-                        return true;
-                    }
-                }else{
+                } else {
                     return false;
                 }
             }
@@ -184,41 +178,55 @@ public class AutograderMain {
 
     }
 
-    private static int getSubjectVerbAgrmntScore(Annotation document) {
+    private static double getSubjectVerbAgrmntScore(Annotation document) {
         List<String> verbPos = Arrays.asList("VB", "VBP", "VBZ");
         List<String> subjPos = Arrays.asList("NNP", "PRP", "NN", "NNPS", "NNS");
         int mistakeCount = 0;
+        List<String> docTokenList = document.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.TextAnnotation.class)).collect(Collectors.toList());
         for (CoreMap sentence : document.get(CoreAnnotations.SentencesAnnotation.class)) {
             List<String> wordList = sentence.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.TextAnnotation.class)).collect(Collectors.toList());
             List<String> posList = sentence.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.PartOfSpeechAnnotation.class)).collect(Collectors.toList());
             List<Integer> verbIndexList = IntStream.range(0, posList.size()).filter(i -> verbPos.contains(posList.get(i))).boxed().collect(Collectors.toList());
-            int viStart = 0;
+            /*int viStart = 0;
             Map<Integer, List<Integer>> verbSubjListMap = new HashMap<>();
             for (Integer viEnd : verbIndexList) {
                 List<Integer> subjIndBefVerbList = IntStream.range(viStart, viEnd).filter(k -> subjPos.contains(posList.get(k))).boxed().collect(Collectors.toList());
+                if (subjIndBefVerbList.size() == 0){
+                    if (posList.get(viEnd - 1).equals("DT")) {
+                        subjIndBefVerbList.add(viEnd - 1);
+                    }else if (posList.get(viEnd - 2).equals("DT")){
+                        subjIndBefVerbList.add(viEnd - 2);
+                    }
+                }
+
                 verbSubjListMap.put(viEnd, subjIndBefVerbList);
                 viStart = viEnd;
-            }
+            }*/
 
+            Map<Integer, List<Integer>> verbSubjListMap = new HashMap<>();
+            SemanticGraph dependencyParse = sentence.get(SemanticGraphCoreAnnotations.EnhancedPlusPlusDependenciesAnnotation.class);
+            for (TypedDependency t : dependencyParse.typedDependencies()) {
+//                if (t.)
+                System.out.println(t.gov() + " " + t.reln() + " " + t.dep() + " " + t.dep().index());
+            }
             for (Map.Entry<Integer, List<Integer>> entry : verbSubjListMap.entrySet()) {
                 int vi = entry.getKey();
                 List<Integer> subjIndBefVerbList = entry.getValue();
                 if (posList.get(vi).equals("VB") || posList.get(vi).equals("VBP")) {
-                    if(isSubjListSglr(subjIndBefVerbList, posList, wordList, vi)){
+                    if (isSubjListSglr(subjIndBefVerbList, posList, wordList, vi)) {
                         mistakeCount++;
                     }
                 } else if (posList.get(vi).equals("VBZ")) {
-                    if(!isSubjListSglr(subjIndBefVerbList, posList, wordList, vi)){
+                    if (!isSubjListSglr(subjIndBefVerbList, posList, wordList, vi)) {
                         mistakeCount++;
                     }
                 }
             }
         }
-        //TODO generate score from mistake count
-        return 0;
+        return ((double) mistakeCount) / docTokenList.size();
     }
 
-    public static void main(String[] args) {
+    public static void main1(String[] args) {
         try {
             Reader reader = Files.newBufferedReader(Paths.get("input/training/index.csv"));
             CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build();
@@ -242,12 +250,28 @@ public class AutograderMain {
                 pipeline.annotate(document);
                 int lengthScore = getLengthScore(document);
                 int spellScore = spellCheck(document);
-//                int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);
-                System.out.println(lengthScore + "\t" + spellScore + "\t" + nextRecord[2]);
+                double subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);
+                System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + nextRecord[2]);
 
             }
         } catch (IOException e) {
             e.printStackTrace();
+        }
+    }
+
+    public static void main(String[] args){
+        Properties props = new Properties();
+        props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
+        StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
+        String doc = "Those are the things of today time.";
+        Annotation document = new Annotation(doc);
+        pipeline.annotate(document);
+        System.out.println(document);
+        List<CoreMap> sentence = document.get(CoreAnnotations.SentencesAnnotation.class);
+        System.out.println(sentence);
+        SemanticGraph dependencyParse = sentence.get(0).get(SemanticGraphCoreAnnotations.EnhancedPlusPlusDependenciesAnnotation.class);
+        for (TypedDependency t : dependencyParse.typedDependencies()) {
+            System.out.println(t.gov() + " " + t.reln() + " " + t.dep() + " " + t.dep().index());
         }
     }
 
