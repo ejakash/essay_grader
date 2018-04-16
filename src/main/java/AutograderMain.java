@@ -151,7 +151,7 @@ public class AutograderMain {
                 }
             } else if (posList.get(subjIndBefVerbList.get(0)).equals("DT")) {
                 //check if word is sg
-                System.out.println();
+                System.out.println();//TODO
 
             } else {
                 return false;
@@ -187,6 +187,7 @@ public class AutograderMain {
             List<String> wordList = sentence.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.TextAnnotation.class)).collect(Collectors.toList());
             List<String> posList = sentence.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.PartOfSpeechAnnotation.class)).collect(Collectors.toList());
             List<Integer> verbIndexList = IntStream.range(0, posList.size()).filter(i -> verbPos.contains(posList.get(i))).boxed().collect(Collectors.toList());
+            System.out.println(verbIndexList);
             /*int viStart = 0;
             Map<Integer, List<Integer>> verbSubjListMap = new HashMap<>();
             for (Integer viEnd : verbIndexList) {
@@ -203,28 +204,53 @@ public class AutograderMain {
                 viStart = viEnd;
             }*/
 
-            Map<Integer, List<Integer>> verbSubjListMap = new HashMap<>();
+            Map<Integer, Set<Integer>> verbSubjSetMap = new HashMap<>();
             SemanticGraph dependencyParse = sentence.get(SemanticGraphCoreAnnotations.EnhancedPlusPlusDependenciesAnnotation.class);
-            for (TypedDependency t : dependencyParse.typedDependencies()) {
-//                if (t.)
-                System.out.println(t.gov() + " " + t.reln() + " " + t.dep() + " " + t.dep().index());
+            for (int verbIndex : verbIndexList) {
+                Set<Integer> subjIndForVerbSet = new HashSet<>();
+                for (TypedDependency t : dependencyParse.typedDependencies()) {
+                    if (t.gov().index() - 1 == verbIndex) {
+                        if (t.reln().toString().equals("nsubj")) {
+                            subjIndForVerbSet.add(t.dep().index() - 1);
+                        }
+                    }
+                }
+                if (subjIndForVerbSet.isEmpty()) {
+                    for (TypedDependency t : dependencyParse.typedDependencies()) {
+                        if (t.dep().index() - 1 == verbIndex) {
+                            if (t.reln().toString().equals("cop") || t.reln().toString().equals("aux")) {
+                                for (TypedDependency c : dependencyParse.typedDependencies()) {
+                                    if (c.gov().index() - 1 == t.gov().index() - 1) {
+                                        if (c.reln().toString().equals("nsubj")) {
+                                            subjIndForVerbSet.add(c.dep().index() - 1);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                verbSubjSetMap.put(verbIndex, subjIndForVerbSet);
             }
-            for (Map.Entry<Integer, List<Integer>> entry : verbSubjListMap.entrySet()) {
-                int vi = entry.getKey();
-                List<Integer> subjIndBefVerbList = entry.getValue();
-                if (posList.get(vi).equals("VB") || posList.get(vi).equals("VBP")) {
-                    if (isSubjListSglr(subjIndBefVerbList, posList, wordList, vi)) {
-                        mistakeCount++;
-                    }
-                } else if (posList.get(vi).equals("VBZ")) {
-                    if (!isSubjListSglr(subjIndBefVerbList, posList, wordList, vi)) {
-                        mistakeCount++;
-                    }
+
+        for (Map.Entry<Integer, Set<Integer>> entry : verbSubjSetMap.entrySet())
+        {
+            int vi = entry.getKey();
+            List<Integer> subjIndBefVerbList = new ArrayList<>(entry.getValue());
+            Collections.sort(subjIndBefVerbList);
+            if (posList.get(vi).equals("VB") || posList.get(vi).equals("VBP")) {
+                if (isSubjListSglr(subjIndBefVerbList, posList, wordList, vi)) {
+                    mistakeCount++;
+                }
+            } else if (posList.get(vi).equals("VBZ")) {
+                if (!isSubjListSglr(subjIndBefVerbList, posList, wordList, vi)) {
+                    mistakeCount++;
                 }
             }
         }
-        return ((double) mistakeCount) / docTokenList.size();
     }
+        return((double)mistakeCount)/docTokenList.size();
+}
 
     public static void main1(String[] args) {
         try {
@@ -259,11 +285,13 @@ public class AutograderMain {
         }
     }
 
-    public static void main(String[] args){
+    public static void main(String[] args) {
         Properties props = new Properties();
         props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
         StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
-        String doc = "Those are the things of today time.";
+//        String doc = "John or Jane eats food and drinks milk.";
+        String doc = "Another is on the way.";
+//        String doc = "Anyone who sees his or her friends runs to greet them.";
         Annotation document = new Annotation(doc);
         pipeline.annotate(document);
         System.out.println(document);
@@ -273,6 +301,9 @@ public class AutograderMain {
         for (TypedDependency t : dependencyParse.typedDependencies()) {
             System.out.println(t.gov() + " " + t.reln() + " " + t.dep() + " " + t.dep().index());
         }
+
+        getSubjectVerbAgrmntScore(document);
+
     }
 
 
