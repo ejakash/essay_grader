@@ -7,6 +7,7 @@ import edu.mit.jwi.IDictionary;
 import edu.mit.jwi.item.IIndexWord;
 import edu.mit.jwi.item.POS;
 import edu.stanford.nlp.ling.CoreAnnotations;
+import edu.stanford.nlp.ling.CoreLabel;
 import edu.stanford.nlp.pipeline.Annotation;
 import edu.stanford.nlp.pipeline.StanfordCoreNLP;
 import edu.stanford.nlp.semgraph.SemanticGraph;
@@ -22,6 +23,7 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -129,6 +131,50 @@ public class AutograderMain {
         dictionary.close();
         return false;
     }
+
+
+
+    static double getGrammarScore(Annotation document) {
+        double badScore = 0;
+        List<CoreMap> sentences = document.get(CoreAnnotations.SentencesAnnotation.class);
+        for (CoreMap sentence : sentences) {
+            boolean hasSubject = containsSubject(sentence);
+            boolean hasVerb = containsVerb(sentence);
+            int posSequenceErrors = computePosSequenceErrors(sentence);
+            if(!hasVerb) badScore += 2;
+            if(!hasSubject) badScore += 1;
+            badScore += 5 * posSequenceErrors;
+        }
+        double normalizedScore = badScore / sentences.size();
+        List<Double> values = Arrays.asList(0D, 0.19D, 0.37, 0.62, 1.77);
+        return 5 - findIntervalIndex(normalizedScore, values); //5 minus is done since we return correctness score and normalized score is wrongness score.
+    }
+
+    private static int computePosSequenceErrors(CoreMap sentence) {
+        return BadPosSequence.getBadSequenceCount(sentence);
+    }
+
+
+    private static boolean containsVerb(CoreMap sentence) {
+        Class<CoreAnnotations.TokensAnnotation> tokenType = CoreAnnotations.TokensAnnotation.class;
+        Class<CoreAnnotations.PartOfSpeechAnnotation> posType = CoreAnnotations.PartOfSpeechAnnotation.class;
+        Function<CoreLabel, String> tokenToPos = token -> token.get(posType);
+        return sentence.get(tokenType).stream().map(tokenToPos).anyMatch(pos -> pos.contains("VB"));
+    }
+
+    private static boolean containsSubject(CoreMap sentence) {
+        boolean hasSubject = false;
+        SemanticGraph dependencyParse = sentence.get(SemanticGraphCoreAnnotations.EnhancedPlusPlusDependenciesAnnotation.class);
+        for (TypedDependency t : dependencyParse.typedDependencies()) {
+            if(t.reln().toString().contains("subj")) {
+                hasSubject = true;
+                break;
+            }
+        }
+        return hasSubject;
+    }
+
+
 
     /**
      * SUBJECT-VERB AGREEMENT
@@ -287,7 +333,8 @@ public class AutograderMain {
                 int lengthScore = getLengthScore(document);
                 int spellScore = spellCheck(document);
                 int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);
-                System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + nextRecord[2]);
+                double grammarScore = getGrammarScore(document);
+                System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + grammarScore + "\t" + nextRecord[2]);
                 // TODO find best weights for features using linear regression
             }
         } catch (IOException e) {
