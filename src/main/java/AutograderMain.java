@@ -248,7 +248,7 @@ public class AutograderMain {
                 }
             }
         }
-        double subjVerbPercent = (1 - (((double) mistakeCount) / docTokenList.size())) * 100;//TODO build score 1-5
+        double subjVerbPercent = (1 - (((double) mistakeCount) / docTokenList.size())) * 100;
         List<Double> values = Arrays.asList(0.0, 97.70, 98.71, 99.28, 99.78);
         return findIntervalIndex(subjVerbPercent, values) + 1;
     }
