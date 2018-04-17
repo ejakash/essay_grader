@@ -53,7 +53,9 @@ public class AutograderMain {
         return intervals.size() - 1;
     }
 
-    /** LENGTH **/
+    /**
+     * LENGTH
+     **/
     private static int getLengthScore(Annotation document) {
         int sentenceCount = 0;
         String[] sepArr = {"CC", "IN", ",", "WRB", "WDT", "WP", "WP$"};
@@ -94,7 +96,9 @@ public class AutograderMain {
 
     }
 
-    /** SPELLING **/
+    /**
+     * SPELLING
+     **/
     private static int spellCheck(Annotation document) {
         List<String> tokenLemma = document.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.LemmaAnnotation.class)).collect(Collectors.toList());
         Long correctCount = tokenLemma.stream().filter(AutograderMain::isCorrect).count();
@@ -126,7 +130,9 @@ public class AutograderMain {
         return false;
     }
 
-    /** SUBJECT-VERB AGREEMENT **/
+    /**
+     * SUBJECT-VERB AGREEMENT
+     **/
     private static boolean isSubjListSnglr(List<Integer> subjIndForVerbList, List<String> posList, List<String> wordList, int vi) {
         List<String> orNor = Arrays.asList("or", "nor");
         if (subjIndForVerbList.size() == 1) {
@@ -145,12 +151,20 @@ public class AutograderMain {
     }
 
     private static boolean isValidInfVerbForm(List<String> infVerbPrecedesList, List<String> posList, int vi, SemanticGraph dependencyParse) {
+        boolean ccomp = false;
+        boolean dobj = false;
         for (TypedDependency t : dependencyParse.typedDependencies()) {
             if (t.dep().index() - 1 == vi) {
-                if (t.reln().toString().equals("ccomp")) {
-                    return true;
+                if (t.reln().toString().equals("ccomp")) {// Mark helped his friend eat.
+                    ccomp = true;
+                }
+                if (t.reln().toString().equals("dobj")) {//But first let us specify what (cats/cat) (eat/eats).
+                    dobj = true;
                 }
             }
+        }
+        if (ccomp) {
+            return !dobj; // ccomp and dobj is not valid, ccomp alone is valid
         }
         return vi == 0 || infVerbPrecedesList.contains(posList.get(vi - 1)); // VB at index 0 is valid
     }
@@ -169,7 +183,7 @@ public class AutograderMain {
             return posList.get(subjIndForVerbList.get(0)).equals("CD") && wordList.get(subjIndForVerbList.get(0)).toLowerCase().equals("one");
     }
 
-    private static double getSubjectVerbAgrmntScore(Annotation document) {
+    private static int getSubjectVerbAgrmntScore(Annotation document) {
         List<String> verbPos = Arrays.asList("VB", "VBP", "VBZ");
         List<String> infVerbPrecedesList = Arrays.asList("MD", "TO");
         int mistakeCount = 0;
@@ -184,7 +198,7 @@ public class AutograderMain {
                 Set<Integer> subjIndForVerbSet = new HashSet<>();
                 for (TypedDependency t : dependencyParse.typedDependencies()) {
                     if (t.gov().index() - 1 == verbIndex) {
-                        if (t.reln().toString().equals("nsubj")) {
+                        if (t.reln().toString().equals("nsubj") && !t.dep().tag().equals("JJ")) {
                             subjIndForVerbSet.add(t.dep().index() - 1);
                         }
                     }
@@ -195,7 +209,7 @@ public class AutograderMain {
                             if (t.reln().toString().equals("cop") || t.reln().toString().equals("aux")) {
                                 for (TypedDependency c : dependencyParse.typedDependencies()) {
                                     if (c.gov().index() - 1 == t.gov().index() - 1) {
-                                        if (c.reln().toString().equals("nsubj")) {
+                                        if (c.reln().toString().equals("nsubj") && !c.dep().tag().equals("JJ")) {
                                             subjIndForVerbSet.add(c.dep().index() - 1);
                                         }
                                     }
@@ -204,7 +218,9 @@ public class AutograderMain {
                         }
                     }
                 }
-                verbSubjSetMap.put(verbIndex, subjIndForVerbSet);
+                if (!subjIndForVerbSet.isEmpty()) {
+                    verbSubjSetMap.put(verbIndex, subjIndForVerbSet);
+                }
             }
 
             for (Map.Entry<Integer, Set<Integer>> entry : verbSubjSetMap.entrySet()) {
@@ -232,11 +248,21 @@ public class AutograderMain {
                 }
             }
         }
-        return ((double) mistakeCount) / docTokenList.size();//TODO build score 1-5
+        double subjVerbPercent = (1 - (((double) mistakeCount) / docTokenList.size())) * 100;//TODO build score 1-5
+        List<Double> values = Arrays.asList(0.0, 97.70, 98.71, 99.28, 99.78);
+        return findIntervalIndex(subjVerbPercent, values) + 1;
     }
 
-    /** MAIN **/
+    /**
+     * MAIN
+     **/
     public static void main(String[] args) {
+        // TODO train/test switch from args
+        trainGrader();
+        //testGrader();
+    }
+
+    private static void trainGrader() {
         try {
             Reader reader = Files.newBufferedReader(Paths.get("input/training/index.csv"));
             CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build();
@@ -260,16 +286,52 @@ public class AutograderMain {
                 pipeline.annotate(document);
                 int lengthScore = getLengthScore(document);
                 int spellScore = spellCheck(document);
-                double subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);
+                int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);
                 System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + nextRecord[2]);
-
+                // TODO find best weights for features using linear regression
             }
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
-    /** DEBUG **/
+    private static void testGrader() {
+        try {
+            Reader reader = Files.newBufferedReader(Paths.get("input/testing/index.csv"));
+            CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build();
+            CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(csvParser).withSkipLines(1).build();
+            String[] nextRecord;
+
+            Properties props = new Properties();
+            props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
+            StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
+
+
+            while ((nextRecord = csvReader.readNext()) != null) {
+                BufferedReader essayReader = Files.newBufferedReader(Paths.get("input/testing/essays/" + nextRecord[0]));
+                StringBuilder essay = new StringBuilder();
+                String line;
+                while ((line = essayReader.readLine()) != null) {
+                    essay.append(line).append("\n");
+                }
+
+                Annotation document = new Annotation(essay.toString());
+                pipeline.annotate(document);
+                int lengthScore = getLengthScore(document);
+                int spellScore = spellCheck(document);
+                int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);
+                System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + nextRecord[2]);
+                // TODO get final score
+                // TODO write output to "output/results.txt"
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * DEBUG
+     **/
     public static void main1(String[] args) throws IOException {
         Properties props = new Properties();
         props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
@@ -277,28 +339,37 @@ public class AutograderMain {
 //        String doc = "John or Jane eat food.";
 //        String doc = "Another is on the way.";
 //        String doc = "Anyone who sees his or her friends runs to greet them.";
-        String doc = "Give him an ornament that he eat.";
-        BufferedReader essayReader = Files.newBufferedReader(Paths.get("input/training/essays/937403.txt"));
-        StringBuilder essay = new StringBuilder();
-        String line;
-        while ((line = essayReader.readLine()) != null) {
-            essay.append(line).append("\n");
-        }
-        Annotation document = new Annotation(doc);
-//        Annotation document = new Annotation(essay.toString());
-        pipeline.annotate(document);
-        System.out.println(document);
-        List<CoreMap> sentenceList = document.get(CoreAnnotations.SentencesAnnotation.class);
-//        System.out.println(sentence);
-        for (CoreMap sentence : sentenceList) {
-            SemanticGraph dependencyParse = sentence.get(SemanticGraphCoreAnnotations.EnhancedPlusPlusDependenciesAnnotation.class);
-            for (TypedDependency t : dependencyParse.typedDependencies()) {
-                System.out.println(t.gov() + " " + t.reln() + " " + t.dep() + " " + t.dep().index());
+//        String doc = "Give him an ornament that he eat.";
+        Reader reader = Files.newBufferedReader(Paths.get("input/training/index.csv"));
+        CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build();
+        CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(csvParser).withSkipLines(1).build();
+        String[] nextRecord;
+//        BufferedReader essayReader = Files.newBufferedReader(Paths.get("input/training/essays/937403.txt"));
+        while ((nextRecord = csvReader.readNext()) != null) {
+            BufferedReader essayReader = Files.newBufferedReader(Paths.get("input/training/essays/" + nextRecord[0]));
+            StringBuilder essay = new StringBuilder();
+            String line;
+            while ((line = essayReader.readLine()) != null) {
+                essay.append(line).append("\n");
+            }
+//        Annotation document = new Annotation(doc);
+            Annotation document = new Annotation(essay.toString());
+            pipeline.annotate(document);
+//            System.out.println(document);
+            List<CoreMap> sentenceList = document.get(CoreAnnotations.SentencesAnnotation.class);
+            for (CoreMap sentence : sentenceList) {
+//                SemanticGraph dependencyParse = sentence.get(SemanticGraphCoreAnnotations.EnhancedPlusPlusDependenciesAnnotation.class);
+//                for (TypedDependency t : dependencyParse.typedDependencies()) {
+//                    System.out.println(t.gov() + " " + t.reln() + " " + t.dep() + " " + t.dep().index());
+//                }
+                if (sentence.toString().contains("?")) {
+                    System.out.println(sentence);
+                }
             }
         }
 //        List<Double> values = Arrays.asList(0D, 1.2, 2D, 3.5, 4.8);
 //        System.out.println(findIntervalIndex(3.4, values));
-        System.out.println(getSubjectVerbAgrmntScore(document));
+//        System.out.println(getSubjectVerbAgrmntScore(document));
 
     }
 
