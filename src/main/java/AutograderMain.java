@@ -13,14 +13,10 @@ import edu.stanford.nlp.trees.TypedDependency;
 import edu.stanford.nlp.util.CoreMap;
 import weka.classifiers.Classifier;
 import weka.classifiers.evaluation.Evaluation;
-import weka.classifiers.functions.Logistic;
 import weka.classifiers.functions.SMO;
 import weka.core.Instance;
 import weka.core.Instances;
-import weka.core.SelectedTag;
-import weka.core.Tag;
 import weka.core.converters.CSVLoader;
-import weka.core.converters.ConverterUtils;
 
 import java.io.*;
 import java.net.MalformedURLException;
@@ -28,6 +24,7 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -39,13 +36,13 @@ public class AutograderMain {
 
     static {
         try {
-            closedWords_en = new HashSet<>(Files.readAllLines(Paths.get("lib/closed_class.txt")));
+            closedWords_en = new HashSet<>(Files.readAllLines(Paths.get("executable/resources/libs/closed_class.txt")));
         } catch (IOException e) {
             e.printStackTrace();
         }
         URL url = null;
         try {
-            url = new URL("file", null, "lib/dict");
+            url = new URL("file", null, "executable/resources/libs/dict");
         } catch (MalformedURLException e) {
             e.printStackTrace();
         }
@@ -307,7 +304,15 @@ public class AutograderMain {
      **/
     public static void main(String[] args) {
         // TODO train/test switch from args
-        trainGrader(false);// TODO add option for buildFeatures
+//        trainGrader(false);// TODO add option for buildFeatures
+        boolean rebuild = false;
+        if(args.length > 1) {
+            rebuild = Boolean.valueOf(args[1]);
+        }
+        Map<String, Consumer> tasks = new HashMap<>();
+        tasks.put("test", bool -> testGrader());
+        tasks.put("train", (Consumer<Boolean>) bool -> trainGrader(bool));
+        tasks.get(args[0]).accept(rebuild);
 //        testGrader();
     }
 
@@ -323,7 +328,7 @@ public class AutograderMain {
                 props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
                 StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
 
-                Writer writer = Files.newBufferedWriter(Paths.get("input/training/train_features.csv"));
+                Writer writer = Files.newBufferedWriter(Paths.get("executable/resources/train_features.csv"));
 
                 CSVWriter csvWriter = new CSVWriter(writer,
                         CSVWriter.DEFAULT_SEPARATOR,
@@ -361,18 +366,18 @@ public class AutograderMain {
         }
         try {
 
-            Instances trainingDataset = getDataSet("input/training/train_features.csv");
-            SMO classifier = new weka.classifiers.functions.SMO();
-            classifier.setOptions(weka.core.Utils.splitOptions("-C 1 -N 2"));
+            Instances trainingDataset = getDataSet("executable/resources/train_features.csv");
+            Classifier classifier = new weka.classifiers.functions.SMO();
+            ((SMO) classifier).setOptions(weka.core.Utils.splitOptions("-C 1 -N 2 -W weka.classifiers.functions.SMO"));
             classifier.buildClassifier(trainingDataset);
             System.out.println(classifier);
 
             Evaluation eval = new Evaluation(trainingDataset);
-//            Instances testingDataSet = getDataSet("input/training/predict_data_set.csv");
+//            Instances testingDataSet = getDataSet("executable/resources/predict_data_set.csv");
 //            eval.evaluateModel(classifier, testingDataSet);
             eval.crossValidateModel(classifier, trainingDataset, 10, new Random(1));
             System.out.println(eval.toSummaryString());
-            Instances predictDataset = getDataSet("input/training/predict_data_set.csv");
+            Instances predictDataset = getDataSet("executable/resources/predict_data_set.csv");
             for (Instance i : predictDataset) {
                 double value = classifier.classifyInstance(i);
                 if (i.classValue() != value) {
@@ -382,7 +387,7 @@ public class AutograderMain {
 
             }
 
-            weka.core.SerializationHelper.write("input/training/essay_grader.model", classifier);
+            weka.core.SerializationHelper.write("executable/resources/essay_grader.model", classifier);
         } catch (Exception e) {
             e.printStackTrace();
         }
