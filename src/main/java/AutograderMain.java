@@ -36,13 +36,13 @@ public class AutograderMain {
 
     static {
         try {
-            closedWords_en = new HashSet<>(Files.readAllLines(Paths.get("executable/resources/libs/closed_class.txt")));
+            closedWords_en = new HashSet<>(Files.readAllLines(Paths.get("resources/libs/closed_class.txt")));
         } catch (IOException e) {
             e.printStackTrace();
         }
         URL url = null;
         try {
-            url = new URL("file", null, "executable/resources/libs/dict");
+            url = new URL("file", null, "resources/libs/dict");
         } catch (MalformedURLException e) {
             e.printStackTrace();
         }
@@ -303,10 +303,8 @@ public class AutograderMain {
      * MAIN
      **/
     public static void main(String[] args) {
-        // TODO train/test switch from args
-//        trainGrader(false);// TODO add option for buildFeatures
         boolean rebuild = false;
-        if(args.length > 1) {
+        if (args.length > 1) {
             rebuild = Boolean.valueOf(args[1]);
         }
         Map<String, Consumer> tasks = new HashMap<>();
@@ -319,7 +317,7 @@ public class AutograderMain {
     private static void trainGrader(boolean buildFeatures) {
         if (buildFeatures) {
             try {
-                Reader reader = Files.newBufferedReader(Paths.get("input/training/index.csv"));
+                Reader reader = Files.newBufferedReader(Paths.get("../input/training/index.csv"));
                 CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build();
                 CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(csvParser).withSkipLines(1).build();
                 String[] nextRecord;
@@ -328,7 +326,7 @@ public class AutograderMain {
                 props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
                 StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
 
-                Writer writer = Files.newBufferedWriter(Paths.get("executable/resources/train_features.csv"));
+                Writer writer = Files.newBufferedWriter(Paths.get("resources/train_features.csv"));
 
                 CSVWriter csvWriter = new CSVWriter(writer,
                         CSVWriter.DEFAULT_SEPARATOR,
@@ -339,7 +337,7 @@ public class AutograderMain {
                 csvWriter.writeNext(headerRecord);
 
                 while ((nextRecord = csvReader.readNext()) != null) {
-                    BufferedReader essayReader = Files.newBufferedReader(Paths.get("input/training/essays/" + nextRecord[0]));
+                    BufferedReader essayReader = Files.newBufferedReader(Paths.get("../input/training/essays/" + nextRecord[0]));
                     StringBuilder essay = new StringBuilder();
                     String line;
                     while ((line = essayReader.readLine()) != null) {
@@ -366,9 +364,9 @@ public class AutograderMain {
         }
         try {
 
-            Instances trainingDataset = getDataSet("executable/resources/train_features.csv");
+            Instances trainingDataset = getDataSet("resources/train_features.csv");
             Classifier classifier = new weka.classifiers.functions.SMO();
-            ((SMO) classifier).setOptions(weka.core.Utils.splitOptions("-C 1 -N 2 -W weka.classifiers.functions.SMO"));
+            ((SMO) classifier).setOptions(weka.core.Utils.splitOptions("-C 1 -N 2"));
             classifier.buildClassifier(trainingDataset);
             System.out.println(classifier);
 
@@ -377,7 +375,7 @@ public class AutograderMain {
 //            eval.evaluateModel(classifier, testingDataSet);
             eval.crossValidateModel(classifier, trainingDataset, 10, new Random(1));
             System.out.println(eval.toSummaryString());
-            Instances predictDataset = getDataSet("executable/resources/predict_data_set.csv");
+            Instances predictDataset = getDataSet("resources/predict_data_set.csv");
             for (Instance i : predictDataset) {
                 double value = classifier.classifyInstance(i);
                 if (i.classValue() != value) {
@@ -387,7 +385,7 @@ public class AutograderMain {
 
             }
 
-            weka.core.SerializationHelper.write("executable/resources/essay_grader.model", classifier);
+            weka.core.SerializationHelper.write("resources/essay_grader.model", classifier);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -408,7 +406,7 @@ public class AutograderMain {
 
     private static void testGrader() {
         try {
-            Reader reader = Files.newBufferedReader(Paths.get("input/testing/index.csv"));
+            Reader reader = Files.newBufferedReader(Paths.get("../input/testing/index.csv"));
             CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build();
             CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(csvParser).withSkipLines(1).build();
             String[] nextRecord;
@@ -417,10 +415,10 @@ public class AutograderMain {
             props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
             StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
 
-            Writer writer = Files.newBufferedWriter(Paths.get("output/results.txt"));
+            Writer writer = Files.newBufferedWriter(Paths.get("../output/results.txt"));
 
             while ((nextRecord = csvReader.readNext()) != null) {
-                BufferedReader essayReader = Files.newBufferedReader(Paths.get("input/testing/essays/" + nextRecord[0]));
+                BufferedReader essayReader = Files.newBufferedReader(Paths.get("../input/testing/essays/" + nextRecord[0]));
                 StringBuilder essay = new StringBuilder();
                 String line;
                 while ((line = essayReader.readLine()) != null) {
