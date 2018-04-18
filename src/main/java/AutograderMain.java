@@ -1,7 +1,4 @@
-import com.opencsv.CSVParser;
-import com.opencsv.CSVParserBuilder;
-import com.opencsv.CSVReader;
-import com.opencsv.CSVReaderBuilder;
+import com.opencsv.*;
 import edu.mit.jwi.Dictionary;
 import edu.mit.jwi.IDictionary;
 import edu.mit.jwi.item.IIndexWord;
@@ -14,10 +11,18 @@ import edu.stanford.nlp.semgraph.SemanticGraph;
 import edu.stanford.nlp.semgraph.SemanticGraphCoreAnnotations;
 import edu.stanford.nlp.trees.TypedDependency;
 import edu.stanford.nlp.util.CoreMap;
+import weka.classifiers.Classifier;
+import weka.classifiers.evaluation.Evaluation;
+import weka.classifiers.functions.Logistic;
+import weka.classifiers.functions.SMO;
+import weka.core.Instance;
+import weka.core.Instances;
+import weka.core.SelectedTag;
+import weka.core.Tag;
+import weka.core.converters.CSVLoader;
+import weka.core.converters.ConverterUtils;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.Reader;
+import java.io.*;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.file.Files;
@@ -70,7 +75,7 @@ public class AutograderMain {
             for (TypedDependency t : dependencyParse.typedDependencies()) {
                 if (t.reln().toString().contains("subj")) {
                     String s = t.dep().originalText();
-                    if (Character.isUpperCase(s.charAt(0))) { //TODO fail:John and <Jane/his dog> went for a walk Jack ate food.
+                    if (Character.isUpperCase(s.charAt(0))) {
                         subjIndexList.add(t.dep().index());
                     }
                 }
@@ -133,16 +138,15 @@ public class AutograderMain {
     }
 
 
-
-    static double getGrammarScore(Annotation document) {
+    static int getGrammarScore(Annotation document) {
         double badScore = 0;
         List<CoreMap> sentences = document.get(CoreAnnotations.SentencesAnnotation.class);
         for (CoreMap sentence : sentences) {
             boolean hasSubject = containsSubject(sentence);
             boolean hasVerb = containsVerb(sentence);
             int posSequenceErrors = computePosSequenceErrors(sentence);
-            if(!hasVerb) badScore += 2;
-            if(!hasSubject) badScore += 1;
+            if (!hasVerb) badScore += 2;
+            if (!hasSubject) badScore += 1;
             badScore += 5 * posSequenceErrors;
         }
         double normalizedScore = badScore / sentences.size();
@@ -166,14 +170,13 @@ public class AutograderMain {
         boolean hasSubject = false;
         SemanticGraph dependencyParse = sentence.get(SemanticGraphCoreAnnotations.EnhancedPlusPlusDependenciesAnnotation.class);
         for (TypedDependency t : dependencyParse.typedDependencies()) {
-            if(t.reln().toString().contains("subj")) {
+            if (t.reln().toString().contains("subj")) {
                 hasSubject = true;
                 break;
             }
         }
         return hasSubject;
     }
-
 
 
     /**
@@ -304,42 +307,98 @@ public class AutograderMain {
      **/
     public static void main(String[] args) {
         // TODO train/test switch from args
-        trainGrader();
-        //testGrader();
+        trainGrader(false);// TODO add option for buildFeatures
+//        testGrader();
     }
 
-    private static void trainGrader() {
+    private static void trainGrader(boolean buildFeatures) {
+        if (buildFeatures) {
+            try {
+                Reader reader = Files.newBufferedReader(Paths.get("input/training/index.csv"));
+                CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build();
+                CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(csvParser).withSkipLines(1).build();
+                String[] nextRecord;
+
+                Properties props = new Properties();
+                props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
+                StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
+
+                Writer writer = Files.newBufferedWriter(Paths.get("input/training/train_features.csv"));
+
+                CSVWriter csvWriter = new CSVWriter(writer,
+                        CSVWriter.DEFAULT_SEPARATOR,
+                        CSVWriter.NO_QUOTE_CHARACTER,
+                        CSVWriter.DEFAULT_ESCAPE_CHARACTER,
+                        CSVWriter.DEFAULT_LINE_END);
+                String[] headerRecord = {"File", "a", "b", "c_i", "c_ii", "c_iii", "d_i", "d_ii", "class"};
+                csvWriter.writeNext(headerRecord);
+
+                while ((nextRecord = csvReader.readNext()) != null) {
+                    BufferedReader essayReader = Files.newBufferedReader(Paths.get("input/training/essays/" + nextRecord[0]));
+                    StringBuilder essay = new StringBuilder();
+                    String line;
+                    while ((line = essayReader.readLine()) != null) {
+                        essay.append(line).append("\n");
+                    }
+
+                    Annotation document = new Annotation(essay.toString());
+                    pipeline.annotate(document);
+                    int lengthScore = getLengthScore(document);
+                    int spellScore = spellCheck(document);
+                    int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);
+                    int grammarScore = getGrammarScore(document);
+                    System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + grammarScore + "\t" + nextRecord[2]);
+
+                    csvWriter.writeNext(new String[]{nextRecord[0], String.valueOf(lengthScore), String.valueOf(spellScore), String.valueOf(subjVerbAgrmntScore), String.valueOf(grammarScore), String.valueOf(0), String.valueOf(0), String.valueOf(0), nextRecord[2]});
+                    essayReader.close();
+
+                }
+                writer.close();
+                reader.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
         try {
-            Reader reader = Files.newBufferedReader(Paths.get("input/training/index.csv"));
-            CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build();
-            CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(csvParser).withSkipLines(1).build();
-            String[] nextRecord;
 
-            Properties props = new Properties();
-            props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
-            StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
+            Instances trainingDataset = getDataSet("input/training/train_features.csv");
+            SMO classifier = new weka.classifiers.functions.SMO();
+            classifier.setOptions(weka.core.Utils.splitOptions("-C 1 -N 2"));
+            classifier.buildClassifier(trainingDataset);
+            System.out.println(classifier);
 
-
-            while ((nextRecord = csvReader.readNext()) != null) {
-                BufferedReader essayReader = Files.newBufferedReader(Paths.get("input/training/essays/" + nextRecord[0]));
-                StringBuilder essay = new StringBuilder();
-                String line;
-                while ((line = essayReader.readLine()) != null) {
-                    essay.append(line).append("\n");
+            Evaluation eval = new Evaluation(trainingDataset);
+//            Instances testingDataSet = getDataSet("input/training/predict_data_set.csv");
+//            eval.evaluateModel(classifier, testingDataSet);
+            eval.crossValidateModel(classifier, trainingDataset, 10, new Random(1));
+            System.out.println(eval.toSummaryString());
+            Instances predictDataset = getDataSet("input/training/predict_data_set.csv");
+            for (Instance i : predictDataset) {
+                double value = classifier.classifyInstance(i);
+                if (i.classValue() != value) {
+                    System.out.println(i);
+                    System.out.println(value);
                 }
 
-                Annotation document = new Annotation(essay.toString());
-                pipeline.annotate(document);
-                int lengthScore = getLengthScore(document);
-                int spellScore = spellCheck(document);
-                int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);
-                double grammarScore = getGrammarScore(document);
-                System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + grammarScore + "\t" + nextRecord[2]);
-                // TODO find best weights for features using linear regression
             }
-        } catch (IOException e) {
+
+            weka.core.SerializationHelper.write("input/training/essay_grader.model", classifier);
+        } catch (Exception e) {
             e.printStackTrace();
         }
+
+
+    }
+
+    private static Instances getDataSet(String filePath) throws IOException {
+        CSVLoader loader = new CSVLoader();
+        loader.setSource(new File(filePath));
+        Instances dataset = loader.getDataSet();
+
+        dataset.deleteAttributeAt(0);
+        dataset.setClassIndex(7);
+
+        return dataset;
     }
 
     private static void testGrader() {
@@ -353,6 +412,7 @@ public class AutograderMain {
             props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
             StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
 
+            Writer writer = Files.newBufferedWriter(Paths.get("output/results.txt"));
 
             while ((nextRecord = csvReader.readNext()) != null) {
                 BufferedReader essayReader = Files.newBufferedReader(Paths.get("input/testing/essays/" + nextRecord[0]));
@@ -367,58 +427,17 @@ public class AutograderMain {
                 int lengthScore = getLengthScore(document);
                 int spellScore = spellCheck(document);
                 int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);
-                System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + nextRecord[2]);
-                // TODO get final score
-                // TODO write output to "output/results.txt"
+                int grammarScore = getGrammarScore(document);
+                double finalScore = 2.1536 * lengthScore - 0.414 * spellScore - 0.0512 * subjVerbAgrmntScore * 0.1026 * grammarScore;
+                String finalGrade = "unknown";
+//                System.out.println(nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + (int)finalScore + ";" + grade);
+                String scoreDetails = nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + 0 + ";" + 0 + ";" + (int) finalScore + ";" + finalGrade + "\n";
+                writer.write(scoreDetails);
+                essayReader.close();
             }
-        } catch (IOException e) {
+            writer.close();
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
-
-    /**
-     * DEBUG
-     **/
-    public static void main1(String[] args) throws IOException {
-        Properties props = new Properties();
-        props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
-        StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
-//        String doc = "John or Jane eat food.";
-//        String doc = "Another is on the way.";
-//        String doc = "Anyone who sees his or her friends runs to greet them.";
-//        String doc = "Give him an ornament that he eat.";
-        Reader reader = Files.newBufferedReader(Paths.get("input/training/index.csv"));
-        CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build();
-        CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(csvParser).withSkipLines(1).build();
-        String[] nextRecord;
-//        BufferedReader essayReader = Files.newBufferedReader(Paths.get("input/training/essays/937403.txt"));
-        while ((nextRecord = csvReader.readNext()) != null) {
-            BufferedReader essayReader = Files.newBufferedReader(Paths.get("input/training/essays/" + nextRecord[0]));
-            StringBuilder essay = new StringBuilder();
-            String line;
-            while ((line = essayReader.readLine()) != null) {
-                essay.append(line).append("\n");
-            }
-//        Annotation document = new Annotation(doc);
-            Annotation document = new Annotation(essay.toString());
-            pipeline.annotate(document);
-//            System.out.println(document);
-            List<CoreMap> sentenceList = document.get(CoreAnnotations.SentencesAnnotation.class);
-            for (CoreMap sentence : sentenceList) {
-//                SemanticGraph dependencyParse = sentence.get(SemanticGraphCoreAnnotations.EnhancedPlusPlusDependenciesAnnotation.class);
-//                for (TypedDependency t : dependencyParse.typedDependencies()) {
-//                    System.out.println(t.gov() + " " + t.reln() + " " + t.dep() + " " + t.dep().index());
-//                }
-                if (sentence.toString().contains("?")) {
-                    System.out.println(sentence);
-                }
-            }
-        }
-//        List<Double> values = Arrays.asList(0D, 1.2, 2D, 3.5, 4.8);
-//        System.out.println(findIntervalIndex(3.4, values));
-//        System.out.println(getSubjectVerbAgrmntScore(document));
-
-    }
-
-
 }
