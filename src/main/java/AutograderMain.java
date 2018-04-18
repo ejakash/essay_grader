@@ -309,7 +309,7 @@ public class AutograderMain {
         }
         Map<String, Consumer> tasks = new HashMap<>();
         tasks.put("test", bool -> testGrader());
-        tasks.put("train", (Consumer<Boolean>) bool -> trainGrader(bool));
+        tasks.put("train", (Consumer<Boolean>) AutograderMain::trainGrader);
         tasks.get(args[0]).accept(rebuild);
 //        testGrader();
     }
