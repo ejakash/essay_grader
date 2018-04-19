@@ -431,9 +431,9 @@ public class AutograderMain {
                 int spellScore = spellCheck(document);
                 int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);
                 int grammarScore = getGrammarScore(document);
-                double finalScore = 2.1536 * lengthScore - 0.414 * spellScore - 0.0512 * subjVerbAgrmntScore * 0.1026 * grammarScore;
+                double finalScore = 2.1429 * lengthScore - 0.8571 * spellScore - 0.1429 * subjVerbAgrmntScore * 0.2857 * grammarScore;
                 String finalGrade = "unknown";
-//                System.out.println(nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + (int)finalScore + ";" + grade);
+                System.out.println(nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + (int)finalScore + ";" + finalGrade);
                 String scoreDetails = nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + 0 + ";" + 0 + ";" + (int) finalScore + ";" + finalGrade + "\n";
                 writer.write(scoreDetails);
                 essayReader.close();
