@@ -74,8 +74,8 @@ public class AutograderMain {
      * find the interval to index mapping, for converting range to score
      *
      * @param searchValue value to map
-     * @param intervals list of intervals
-     * @param <N> Number
+     * @param intervals   list of intervals
+     * @param <N>         Number
      * @return mapped index
      */
     private static <N extends Number> int findIntervalIndex(Number searchValue, List<N> intervals) {
@@ -243,9 +243,9 @@ public class AutograderMain {
      * check if the subject(s) of the verb at index vi, is singular
      *
      * @param subjIndForVerbList list of subject indices
-     * @param posList list of pos tags
-     * @param wordList list of words
-     * @param vi verb index
+     * @param posList            list of pos tags
+     * @param wordList           list of words
+     * @param vi                 verb index
      * @return boolean
      */
     private static boolean isSubjListSnglr(List<Integer> subjIndForVerbList, List<String> posList, List<String> wordList, int vi) {
@@ -269,9 +269,9 @@ public class AutograderMain {
      * check if the infinitival verb form (VB) is valid
      *
      * @param infVerbPrecedesList list of infinitival verb preceding tags
-     * @param posList list of pos tags
-     * @param vi verb index
-     * @param dependencyParse dependency graph
+     * @param posList             list of pos tags
+     * @param vi                  verb index
+     * @param dependencyParse     dependency graph
      * @return boolean
      */
     private static boolean isValidInfVerbForm(List<String> infVerbPrecedesList, List<String> posList, int vi, SemanticGraph dependencyParse) {
@@ -297,9 +297,9 @@ public class AutograderMain {
      * check if single subject is singular
      *
      * @param subjIndForVerbList list of subject indices
-     * @param posList list of pos tags
-     * @param wordList lit of words
-     * @param i index
+     * @param posList            list of pos tags
+     * @param wordList           lit of words
+     * @param i                  index
      * @return boolean
      */
     private static boolean isSingleSubjSnglr(List<Integer> subjIndForVerbList, List<String> posList, List<String> wordList, int i) {
@@ -395,9 +395,9 @@ public class AutograderMain {
     /**
      * traverse the constituency parse tree for a sentence
      *
-     * @param child tree node
-     * @param root root of tree
-     * @param sfAttrCountsMap contituent counts map
+     * @param child             tree node
+     * @param root              root of tree
+     * @param sfAttrCountsMap   contituent counts map
      * @param allParentChildren all parent children sequences
      */
     private static void traverseParseTree(Tree child, Tree root, Map<String, Integer> sfAttrCountsMap, Set<String> allParentChildren) {
@@ -425,7 +425,7 @@ public class AutograderMain {
     /**
      * extract all the parent child constituents for the node
      *
-     * @param child tree node
+     * @param child             tree node
      * @param allParentChildren all parent children sequences
      */
     private static void extractAllParentChildSeqs(Tree child, Set<String> allParentChildren) {
@@ -551,6 +551,148 @@ public class AutograderMain {
     }
 
     /**
+     * @param document
+     * @param topic
+     * @return
+     * @throws IOException
+     */
+    private static int getTopicRelevanceScore(Annotation document, String topic) throws IOException {
+        if (!dictionary.isOpen()) dictionary.open();
+        if (topic.contains("\t")) topic = topic.split("\t+")[1];
+        Annotation topicAnnotation = processTopic(topic);
+        Set<String> topicNouns = getMainNouns(topicAnnotation);
+        Set<String> documentNouns = getMainNouns(document);
+        Set<LinkedList<ISynset>> topicHyperTrees = topicNouns.stream().flatMap(word -> findRelationalTrees(word, AutograderMain::getHypernyms).stream()).collect(Collectors.toSet());
+        Map<String, Double> wordScores = documentNouns.stream().collect(Collectors.toMap(Function.identity(), word -> getSimilarityScore(word, topicHyperTrees)));
+        dictionary.close();
+        if (wordScores.isEmpty()) return 0;
+        return ((Double) wordScores.values().stream().mapToDouble(value -> value).average().getAsDouble()).intValue();
+    }
+
+    /**
+     * @param word
+     * @param topicHyperTrees
+     * @return
+     */
+    private static Double getSimilarityScore(String word, Set<LinkedList<ISynset>> topicHyperTrees) {
+        Set<LinkedList<ISynset>> wordHyperTrees = findRelationalTrees(word, AutograderMain::getHypernyms);
+        if (!topicHyperTrees.isEmpty() && !wordHyperTrees.isEmpty()) {
+            Double score = Sets.cross(wordHyperTrees, topicHyperTrees).stream().map(treePair -> getSimilarityScore(treePair.first, treePair.second)).max(Comparator.naturalOrder()).get();
+            return score;
+        }
+        return 0D;
+    }
+
+    /**
+     * @param wordTree
+     * @param topicTree
+     * @return
+     */
+    private static Double getSimilarityScore(LinkedList<ISynset> wordTree, LinkedList<ISynset> topicTree) {
+        Double max_score = 3D;
+        if (topicTree.getLast().equals(wordTree.getLast())) return max_score;
+        double score = 0D;
+        Set<ISynset> wordNetTopic = wordTree.getLast().getRelatedMap().getOrDefault(Pointer.TOPIC, Generics.newArrayList()).stream().map(id -> dictionary.getSynset(id)).collect(Collectors.toSet());
+        if (Sets.intersects(wordNetTopic, new HashSet<>(topicTree))) score += max_score;
+
+        if (wordTree.contains(topicTree.getLast()) || topicTree.contains(wordTree.getLast())) score += max_score;
+
+        Set<ISynset> commonNodes = Sets.intersection(new HashSet<>(wordTree), new HashSet<>(topicTree));
+        if (commonNodes.isEmpty()) return score;
+        ISynset lowestCommonNode = commonNodes.stream().max(Comparator.comparingInt(wordTree::indexOf)).get();
+        int depth1 = wordTree.indexOf(lowestCommonNode) + 1;
+        int depth2 = topicTree.indexOf(lowestCommonNode) + 1;
+        int depth = depth1 < depth2 ? depth1 : depth2;
+        score += (double) (6 * depth) / (wordTree.size() + topicTree.size());
+
+        return score < max_score ? score : max_score;
+    }
+
+    /**
+     * @param word
+     * @param relationFunction
+     * @return
+     */
+    private static Set<LinkedList<ISynset>> findRelationalTrees(String word, Function<ISynset, Set<ISynset>> relationFunction) {
+        return dictionary.getIndexWord(word, POS.NOUN).getWordIDs().stream()
+                .map(wordID -> dictionary.getWord(wordID).getSynset())
+                .flatMap(synset -> findRelationalTrees(synset, relationFunction).stream())
+                .collect(Collectors.toSet());
+    }
+
+    /**
+     * @param word
+     * @param relationFunction
+     * @return
+     */
+    private static Set<LinkedList<ISynset>> findRelationalTrees(ISynset word, Function<ISynset, Set<ISynset>> relationFunction) {
+        Set<LinkedList<ISynset>> incompleteHyperTrees = new HashSet<>(Collections.singletonList(new LinkedList<>(Collections.singletonList(word))));
+        Set<LinkedList<ISynset>> completeHyperTrees = new HashSet<>();
+
+        while (!incompleteHyperTrees.isEmpty()) {
+            LinkedList<ISynset> currentHyperTree = incompleteHyperTrees.iterator().next();
+            incompleteHyperTrees.remove(currentHyperTree);
+            ISynset head = currentHyperTree.getFirst();
+            Set<ISynset> parents = relationFunction.apply(head);
+            if (parents.isEmpty()) completeHyperTrees.add(currentHyperTree);
+            Stream<LinkedList<ISynset>> updatedHyperTrees = parents.stream().map(parent -> Stream.concat(Stream.of(parent), currentHyperTree.stream()).collect(Collectors.toCollection(LinkedList::new)));
+            updatedHyperTrees.forEach(incompleteHyperTrees::add);
+        }
+        return completeHyperTrees;
+    }
+
+    /**
+     * @param head
+     * @return
+     */
+    private static Set<ISynset> getHypernyms(ISynset head) {
+        return Sets.union(new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.HYPERNYM, new ArrayList<>())), new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.HYPERNYM_INSTANCE, new ArrayList<>()))).stream().map(dictionary::getSynset).collect(Collectors.toSet());
+    }
+
+    /**
+     * @param head
+     * @param relation
+     * @return
+     */
+    private static Set<ISynset> getRelated(ISynset head, Pointer relation) {
+        return new HashSet<>(head.getRelatedMap().getOrDefault(relation, new ArrayList<>())).stream().map(dictionary::getSynset).collect(Collectors.toSet());
+    }
+
+    /**
+     * @param head
+     * @return
+     */
+    private static Set<ISynset> getMeronyms(ISynset head) {
+        Set<ISynsetID> partUnion = Sets.union(new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.MERONYM_MEMBER, new ArrayList<>())), new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.MERONYM_PART, new ArrayList<>())));
+        return Sets.union(partUnion, new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.MERONYM_SUBSTANCE, new ArrayList<>()))).stream().map(dictionary::getSynset).collect(Collectors.toSet());
+    }
+
+    /**
+     * @param document
+     * @return
+     */
+    private static Set<String> getMainNouns(Annotation document) {
+        return document.get(CoreAnnotations.TokensAnnotation.class).stream()
+                .filter(token -> token.get(CoreAnnotations.PartOfSpeechAnnotation.class).contains("NN"))
+                .map(token -> token.get(CoreAnnotations.LemmaAnnotation.class))
+                .filter(word -> !stopwords_en.contains(word.toLowerCase()) && dictionary.getIndexWord(word, POS.NOUN) != null)
+                .collect(Collectors.toSet());
+    }
+
+    /**
+     * @param topic
+     * @return
+     */
+    private static Annotation processTopic(String topic) {
+        Properties props = new Properties();
+        props.setProperty("annotators", "tokenize,ssplit,pos,lemma");
+        StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
+        Annotation topicAnnotation = new Annotation(topic);
+        pipeline.annotate(topicAnnotation);
+        return topicAnnotation;
+    }
+
+    /**
      * Essay Autograder: reads essay and grades high/low
      *
      * @param args cmd line args
@@ -608,11 +750,11 @@ public class AutograderMain {
                     int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document); // part (c i)
                     int grammarScore = getGrammarScore(document);// part (c ii)
                     int sentFormScore = getSentenceFormationScore(document);// part (c iii)
-                    int topicScore = getTopicRelevanceScore(document, nextRecord[1]);
+                    int topicScore = getTopicRelevanceScore(document, nextRecord[1]);// part (d ii)
 
-                    System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + grammarScore + "\t" + topicScore + "\t" + sentFormScore + "\t" + nextRecord[2]);
+                    System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + grammarScore + "\t" + sentFormScore + "\t" + 0 + "\t" + topicScore + "\t" + nextRecord[2]);
 
-                    csvWriter.writeNext(new String[]{nextRecord[0], String.valueOf(lengthScore), String.valueOf(spellScore), String.valueOf(subjVerbAgrmntScore), String.valueOf(grammarScore), String.valueOf(topicScore), String.valueOf(sentFormScore), String.valueOf(0), String.valueOf(0), nextRecord[2]});// save features to file
+                    csvWriter.writeNext(new String[]{nextRecord[0], String.valueOf(lengthScore), String.valueOf(spellScore), String.valueOf(subjVerbAgrmntScore), String.valueOf(grammarScore), String.valueOf(sentFormScore), String.valueOf(0), String.valueOf(topicScore), nextRecord[2]});// save features to file
                     essayReader.close();
 
                 }
@@ -715,8 +857,8 @@ public class AutograderMain {
                 double intercept = 6.00;// intercept
                 String finalGrade = (finalScore + intercept >= 1D) ? "high" : "low";
 
-                System.out.println(nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";"  + topicScore + ";" + (int) finalScore + ";" + finalGrade);
-                String scoreDetails = nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";"  + topicScore + 0 + ";" + 0 + ";" + (int) finalScore + ";" + finalGrade + "\n";
+                System.out.println(nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + sentFormScore + ";" + 0 + ";" + topicScore + ";" + (int) finalScore + ";" + finalGrade);
+                String scoreDetails = nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + sentFormScore + ";" + 0 + ";" + topicScore + ";" + (int) finalScore + ";" + finalGrade + "\n";
                 writer.write(scoreDetails);
                 essayReader.close();
             }
@@ -726,100 +868,5 @@ public class AutograderMain {
         }
     }
 
-
-    private static int getTopicRelevanceScore(Annotation document, String topic) throws IOException {
-        if(!dictionary.isOpen()) dictionary.open();
-        if(topic.contains("\t")) topic = topic.split("\t+")[1];
-        Annotation topicAnnotation = processTopic(topic);
-        Set<String> topicNouns = getMainNouns(topicAnnotation);
-        Set<String> documentNouns = getMainNouns(document);
-        Set<LinkedList<ISynset>> topicHyperTrees = topicNouns.stream().flatMap(word -> findRelationalTrees(word, AutograderMain::getHypernyms).stream()).collect(Collectors.toSet());
-        Map<String, Double> wordScores = documentNouns.stream().collect(Collectors.toMap(Function.identity(), word -> getSimilarityScore(word, topicHyperTrees)));
-        dictionary.close();
-        if(wordScores.isEmpty()) return 0;
-        return ((Double)wordScores.values().stream().mapToDouble(value -> value).average().getAsDouble()).intValue();
-    }
-
-    private static Double getSimilarityScore(String word, Set<LinkedList<ISynset>> topicHyperTrees) {
-        Set<LinkedList<ISynset>> wordHyperTrees = findRelationalTrees(word, AutograderMain::getHypernyms);
-        if(!topicHyperTrees.isEmpty() && !wordHyperTrees.isEmpty()) {
-            Double score = Sets.cross(wordHyperTrees, topicHyperTrees).stream().map(treePair -> getSimilarityScore(treePair.first, treePair.second)).max(Comparator.naturalOrder()).get();
-            return score;
-        }
-        return 0D;
-    }
-
-    private static Double getSimilarityScore(LinkedList<ISynset> wordTree, LinkedList<ISynset> topicTree) {
-        Double max_score = 3D;
-        if(topicTree.getLast().equals(wordTree.getLast())) return max_score;
-        double score = 0D;
-        Set<ISynset> wordNetTopic = wordTree.getLast().getRelatedMap().getOrDefault(Pointer.TOPIC, Generics.newArrayList()).stream().map(id -> dictionary.getSynset(id)).collect(Collectors.toSet());
-        if(Sets.intersects(wordNetTopic, new HashSet<>(topicTree))) score += max_score;
-
-        if(wordTree.contains(topicTree.getLast()) || topicTree.contains(wordTree.getLast())) score += max_score;
-
-        Set<ISynset> commonNodes = Sets.intersection(new HashSet<>(wordTree), new HashSet<>(topicTree));
-        if(commonNodes.isEmpty()) return score;
-        ISynset lowestCommonNode = commonNodes.stream().max(Comparator.comparingInt(wordTree::indexOf)).get();
-        int depth1 = wordTree.indexOf(lowestCommonNode) + 1;
-        int depth2 = topicTree.indexOf(lowestCommonNode) + 1;
-        int depth = depth1 < depth2 ? depth1 : depth2;
-        score += (double) (6 * depth) / (wordTree.size() + topicTree.size());
-
-        return score < max_score ? score : max_score;
-    }
-
-    private static Set<LinkedList<ISynset>> findRelationalTrees(String word, Function<ISynset, Set<ISynset>> relationFunction) {
-        return dictionary.getIndexWord(word, POS.NOUN).getWordIDs().stream()
-                .map(wordID -> dictionary.getWord(wordID).getSynset())
-                .flatMap(synset -> findRelationalTrees(synset, relationFunction).stream())
-                .collect(Collectors.toSet());
-    }
-
-    private static Set<LinkedList<ISynset>> findRelationalTrees(ISynset word, Function<ISynset, Set<ISynset>> relationFunction) {
-        Set<LinkedList<ISynset>> incompleteHyperTrees =  new HashSet<>(Collections.singletonList(new LinkedList<>(Collections.singletonList(word))));
-        Set<LinkedList<ISynset>> completeHyperTrees =  new HashSet<>();
-
-        while (!incompleteHyperTrees.isEmpty()) {
-            LinkedList<ISynset> currentHyperTree = incompleteHyperTrees.iterator().next();
-            incompleteHyperTrees.remove(currentHyperTree);
-            ISynset head = currentHyperTree.getFirst();
-            Set<ISynset> parents = relationFunction.apply(head);
-            if(parents.isEmpty()) completeHyperTrees.add(currentHyperTree);
-            Stream<LinkedList<ISynset>> updatedHyperTrees = parents.stream().map(parent -> Stream.concat(Stream.of(parent), currentHyperTree.stream()).collect(Collectors.toCollection(LinkedList::new)));
-            updatedHyperTrees.forEach(incompleteHyperTrees::add);
-        }
-        return completeHyperTrees;
-    }
-
-    private static Set<ISynset> getHypernyms(ISynset head) {
-        return Sets.union(new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.HYPERNYM, new ArrayList<>())), new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.HYPERNYM_INSTANCE, new ArrayList<>()))).stream().map(dictionary::getSynset).collect(Collectors.toSet());
-    }
-
-    private static Set<ISynset> getRelated(ISynset head, Pointer relation) {
-        return new HashSet<>(head.getRelatedMap().getOrDefault(relation, new ArrayList<>())).stream().map(dictionary::getSynset).collect(Collectors.toSet());
-    }
-
-    private static Set<ISynset> getMeronyms(ISynset head) {
-        Set<ISynsetID> partUnion = Sets.union(new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.MERONYM_MEMBER, new ArrayList<>())), new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.MERONYM_PART, new ArrayList<>())));
-        return Sets.union(partUnion, new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.MERONYM_SUBSTANCE, new ArrayList<>()))).stream().map(dictionary::getSynset).collect(Collectors.toSet());
-    }
-
-    private static Set<String> getMainNouns(Annotation document) {
-        return document.get(CoreAnnotations.TokensAnnotation.class).stream()
-                .filter(token -> token.get(CoreAnnotations.PartOfSpeechAnnotation.class).contains("NN"))
-                .map(token -> token.get(CoreAnnotations.LemmaAnnotation.class))
-                .filter(word -> !stopwords_en.contains(word.toLowerCase()) && dictionary.getIndexWord(word, POS.NOUN) != null)
-                .collect(Collectors.toSet());
-    }
-
-    private static Annotation processTopic(String topic) {
-        Properties props = new Properties();
-        props.setProperty("annotators", "tokenize,ssplit,pos,lemma");
-        StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
-        Annotation topicAnnotation = new Annotation(topic);
-        pipeline.annotate(topicAnnotation);
-        return topicAnnotation;
-    }
 
 }
