@@ -43,8 +43,8 @@ public class AutograderMain {
     private static List<String> sentStartConflictVerbs = Arrays.asList("VB", "VBN", "VBZ", "VBP", "VBD");
     private static List<String> tagsToExclude = Arrays.asList(",", ".", "``", "''", ":", "#", "", "--", "$", "-NONE-", "-LRB-", "-RRB-", "POS");
     private static Set<String> allTreebankRules = new HashSet<>();
-    private static Map<String, Integer> allSeqMistakesFreq = new HashMap<>();
-    private static Set<String> allSeqMistakes = new HashSet<>();
+//    private static Map<String, Integer> allSeqMistakesFreq = new HashMap<>();
+//    private static Set<String> allSeqMistakes = new HashSet<>();
 
     static {
         String execPath = System.getProperty("user.dir");
@@ -66,6 +66,14 @@ public class AutograderMain {
         if (url != null) dictionary = new Dictionary(url);
     }
 
+    /**
+     * find the interval to index mapping, for converting range to score
+     *
+     * @param searchValue value to map
+     * @param intervals list of intervals
+     * @param <N> Number
+     * @return mapped index
+     */
     private static <N extends Number> int findIntervalIndex(Number searchValue, List<N> intervals) {
         for (int i = 0; i < intervals.size() - 1; i++) {
             if (intervals.get(i).doubleValue() <= searchValue.doubleValue() && intervals.get(i + 1).doubleValue() > searchValue.doubleValue())
@@ -75,60 +83,72 @@ public class AutograderMain {
     }
 
     /**
-     * LENGTH
-     **/
+     * part (a) - get the score based on length
+     *
+     * @param document annotated document
+     * @return score
+     */
     private static int getLengthScore(Annotation document) {
         int sentenceCount = 0;
-        String[] sepArr = {"CC", "IN", ",", "WRB", "WDT", "WP", "WP$"};
+        String[] sepArr = {"CC", "IN", ",", "WRB", "WDT", "WP", "WP$"};// all pos tags that separate two independent clauses
         for (CoreMap sentence : document.get(CoreAnnotations.SentencesAnnotation.class)) {
             SemanticGraph dependencyParse =
-                    sentence.get(SemanticGraphCoreAnnotations.BasicDependenciesAnnotation.class);
+                    sentence.get(SemanticGraphCoreAnnotations.BasicDependenciesAnnotation.class);// get the dependency graph
 
-            int sentenceSplitCount = 0;
-            List<Integer> subjIndexList = new ArrayList<>();
+            int sentenceSplitCount = 0;// count for possible sentences within a sentence
+            List<Integer> subjIndexList = new ArrayList<>();// list of subject indices
             for (TypedDependency t : dependencyParse.typedDependencies()) {
                 if (t.reln().toString().contains("subj")) {
                     String s = t.dep().originalText();
                     if (Character.isUpperCase(s.charAt(0))) {
-                        subjIndexList.add(t.dep().index());
+                        subjIndexList.add(t.dep().index());// if relation is subject and the dependent starts with uppercase, add its index
                     }
                 }
             }
-            List<String> posList = sentence.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.PartOfSpeechAnnotation.class)).collect(Collectors.toList());
-            Collections.sort(subjIndexList);
+            List<String> posList = sentence.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.PartOfSpeechAnnotation.class)).collect(Collectors.toList());// get list of pos tags
+            Collections.sort(subjIndexList);// sort indices
             if (subjIndexList.size() > 1) {
                 for (int i = 1; i < subjIndexList.size(); i++) {
                     int sepCount = (int) IntStream.range(subjIndexList.get(i - 1), subjIndexList.get(i))
-                            .filter(k -> (Arrays.asList(sepArr).contains(posList.get(k - 1)))).count();
+                            .filter(k -> (Arrays.asList(sepArr).contains(posList.get(k - 1)))).count();// count separators between clauses
                     if (sepCount == 0) {
-                        sentenceSplitCount++;
+                        sentenceSplitCount++;// increment number of possible sentences, if there are no separators
                     }
                 }
             }
             if (sentenceSplitCount > 1) {
-                sentenceCount += sentenceSplitCount;
+                sentenceCount += sentenceSplitCount;// update total number of sentences
             } else {
                 sentenceCount++;
             }
         }
 
-        List<Integer> values = Arrays.asList(0, 10, 13, 16, 20);
-        return findIntervalIndex(sentenceCount, values) + 1;
+        List<Integer> values = Arrays.asList(0, 10, 13, 16, 20);// thresholds based on mean and standard deviation
+        return findIntervalIndex(sentenceCount, values) + 1;// return 1-5 mapped score
 
     }
 
     /**
-     * SPELLING
-     **/
+     * part (b) - get the score based on misspells
+     *
+     * @param document annotated document
+     * @return score
+     */
     private static int spellCheck(Annotation document) {
-        List<String> tokenLemma = document.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.LemmaAnnotation.class)).collect(Collectors.toList());
-        Long correctCount = tokenLemma.stream().filter(AutograderMain::isCorrect).count();
-        double spellRatio = (1 - (double) correctCount / tokenLemma.size());
-        List<Double> values = Arrays.asList(0D, 0.01, 0.022, 0.033, 0.088);
-        return findIntervalIndex(spellRatio, values);
+        List<String> tokenLemma = document.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.LemmaAnnotation.class)).collect(Collectors.toList());// get lemmatized tokens
+        Long correctCount = tokenLemma.stream().filter(AutograderMain::isCorrect).count();// get the count of correct words
+        double spellRatio = (1 - (double) correctCount / tokenLemma.size());// get the ratio of misspells
+        List<Double> values = Arrays.asList(0D, 0.01, 0.022, 0.033, 0.088);// thresholds based on mean and standard deviation
+        return findIntervalIndex(spellRatio, values);// return 0-4 mapped score
 
     }
 
+    /**
+     * check for correct spelling
+     *
+     * @param text word
+     * @return boolean
+     */
     private static boolean isCorrect(String text) {
         if (closedWords_en == null) System.out.println("Unable to read the closed word list");
         else if (closedWords_en.contains(text.toLowerCase())) return true;
@@ -138,41 +158,57 @@ public class AutograderMain {
             return true;
         }
         try {
-            dictionary.open();
+            dictionary.open();// open wordnet dictionary
         } catch (IOException e) {
             e.printStackTrace();
         }
-        POS[] posList = {POS.NOUN, POS.VERB, POS.ADJECTIVE, POS.ADVERB};
+        POS[] posList = {POS.NOUN, POS.VERB, POS.ADJECTIVE, POS.ADVERB};// wordnet pos tags
         for (POS pos : posList) {
-            IIndexWord idxWord = dictionary.getIndexWord(text, pos);
+            IIndexWord idxWord = dictionary.getIndexWord(text, pos);// search in dictionary
             if (idxWord != null) return true;
         }
         dictionary.close();
         return false;
     }
 
-
+    /**
+     * part (c ii) - get verb mistakes score
+     *
+     * @param document annotated document
+     * @return score
+     */
     static int getGrammarScore(Annotation document) {
         double badScore = 0;
-        List<CoreMap> sentences = document.get(CoreAnnotations.SentencesAnnotation.class);
+        List<CoreMap> sentences = document.get(CoreAnnotations.SentencesAnnotation.class);// get sentences
         for (CoreMap sentence : sentences) {
-            boolean hasSubject = containsSubject(sentence);
-            boolean hasVerb = containsVerb(sentence);
-            int posSequenceErrors = computePosSequenceErrors(sentence);
+            boolean hasSubject = containsSubject(sentence);// check if subject is present, for main verb presence
+            boolean hasVerb = containsVerb(sentence);// check if any verb is present
+            int posSequenceErrors = computePosSequenceErrors(sentence);// count rule violations for verb tense and other missing/extra verbs
             if (!hasVerb) badScore += 2;
             if (!hasSubject) badScore += 1;
             badScore += 5 * posSequenceErrors;
         }
         double normalizedScore = badScore / sentences.size();
-        List<Double> values = Arrays.asList(0D, 0.19D, 0.37, 0.62, 1.77);
-        return 5 - findIntervalIndex(normalizedScore, values); //5 minus is done since we return correctness score and normalized score is wrongness score.
+        List<Double> values = Arrays.asList(0D, 0.19D, 0.37, 0.62, 1.77);// thresholds based on mean and standard deviation
+        return 5 - findIntervalIndex(normalizedScore, values);// 5 minus is done since we return correctness score and normalized score is wrongness score.
     }
 
+    /**
+     * compute all pos sequence errors
+     *
+     * @param sentence sentence
+     * @return count
+     */
     private static int computePosSequenceErrors(CoreMap sentence) {
         return BadPosSequence.getBadSequenceCount(sentence);
     }
 
-
+    /**
+     * check if sentence contains any verb
+     *
+     * @param sentence sentence
+     * @return boolean
+     */
     private static boolean containsVerb(CoreMap sentence) {
         Class<CoreAnnotations.TokensAnnotation> tokenType = CoreAnnotations.TokensAnnotation.class;
         Class<CoreAnnotations.PartOfSpeechAnnotation> posType = CoreAnnotations.PartOfSpeechAnnotation.class;
@@ -180,6 +216,12 @@ public class AutograderMain {
         return sentence.get(tokenType).stream().map(tokenToPos).anyMatch(pos -> pos.contains("VB"));
     }
 
+    /**
+     * check if sentence contains a subject
+     *
+     * @param sentence sentence
+     * @return boolean
+     */
     private static boolean containsSubject(CoreMap sentence) {
         boolean hasSubject = false;
         SemanticGraph dependencyParse = sentence.get(SemanticGraphCoreAnnotations.EnhancedPlusPlusDependenciesAnnotation.class);
@@ -194,34 +236,49 @@ public class AutograderMain {
 
 
     /**
-     * SUBJECT-VERB AGREEMENT
-     **/
+     * check if the subject(s) of the verb at index vi, is singular
+     *
+     * @param subjIndForVerbList list of subject indices
+     * @param posList list of pos tags
+     * @param wordList list of words
+     * @param vi verb index
+     * @return boolean
+     */
     private static boolean isSubjListSnglr(List<Integer> subjIndForVerbList, List<String> posList, List<String> wordList, int vi) {
         List<String> orNor = Arrays.asList("or", "nor");
-        if (subjIndForVerbList.size() == 1) {
-            return isSingleSubjSnglr(subjIndForVerbList, posList, wordList, 0);
-        } else if (subjIndForVerbList.size() > 1) {
-            int andCount = (int) IntStream.range(subjIndForVerbList.get(0), vi).filter(k -> wordList.get(k).equals("and")).count();
-            int orNorCount = (int) IntStream.range(subjIndForVerbList.get(0), vi).filter(k -> orNor.contains(wordList.get(k))).count();
+        if (subjIndForVerbList.size() == 1) {// if there is only one entity in the subject
+            return isSingleSubjSnglr(subjIndForVerbList, posList, wordList, 0);// check if the single subject is singular
+        } else if (subjIndForVerbList.size() > 1) {// if there are multiple entities in the subject
+            int andCount = (int) IntStream.range(subjIndForVerbList.get(0), vi).filter(k -> wordList.get(k).equals("and")).count();// count the entities separated by and
+            int orNorCount = (int) IntStream.range(subjIndForVerbList.get(0), vi).filter(k -> orNor.contains(wordList.get(k))).count();// count the enitities separated by or/nor
             if (andCount >= 1) {
-                return false;
-            } else if (orNorCount >= 1) {
-                return isSingleSubjSnglr(subjIndForVerbList, posList, wordList, subjIndForVerbList.size() - 1);
+                return false;// plural if there is atleast one 'and'
+            } else if (orNorCount >= 1) {// if there is atleast one or/nor
+                return isSingleSubjSnglr(subjIndForVerbList, posList, wordList, subjIndForVerbList.size() - 1);// check if the last entity is singular
             }
         }
-        return false;//Find the success
+        return false;// default to plural <Ex: Find the success.>
 
     }
 
+    /**
+     * check if the infinitival verb form (VB) is valid
+     *
+     * @param infVerbPrecedesList list of infinitival verb preceding tags
+     * @param posList list of pos tags
+     * @param vi verb index
+     * @param dependencyParse dependency graph
+     * @return boolean
+     */
     private static boolean isValidInfVerbForm(List<String> infVerbPrecedesList, List<String> posList, int vi, SemanticGraph dependencyParse) {
-        boolean ccomp = false;
-        boolean dobj = false;
+        boolean ccomp = false;// clausal complement
+        boolean dobj = false;// direct object
         for (TypedDependency t : dependencyParse.typedDependencies()) {
             if (t.dep().index() - 1 == vi) {
-                if (t.reln().toString().equals("ccomp")) {// Mark helped his friend eat.
+                if (t.reln().toString().equals("ccomp")) {// <Ex:Mark helped his friend eat.>
                     ccomp = true;
                 }
-                if (t.reln().toString().equals("dobj")) {//But first let us specify what (cats/cat) (eat/eats).
+                if (t.reln().toString().equals("dobj")) {// <Ex: But first let us specify what (cats/cat) (eat/eats).>
                     dobj = true;
                 }
             }
@@ -232,48 +289,63 @@ public class AutograderMain {
         return vi == 0 || infVerbPrecedesList.contains(posList.get(vi - 1)); // VB at index 0 is valid
     }
 
+    /**
+     * check if single subject is singular
+     *
+     * @param subjIndForVerbList list of subject indices
+     * @param posList list of pos tags
+     * @param wordList lit of words
+     * @param i index
+     * @return boolean
+     */
     private static boolean isSingleSubjSnglr(List<Integer> subjIndForVerbList, List<String> posList, List<String> wordList, int i) {
-        List<String> nounSgPos = Arrays.asList("NNP", "NN");
-        List<String> thirdPersSg = Arrays.asList("He", "She", "It", "he", "she", "it");
-        List<String> demonsDetSg = Arrays.asList("This", "That", "this", "that");
+        List<String> nounSgPos = Arrays.asList("NNP", "NN"); // singular nouns
+        List<String> thirdPersSg = Arrays.asList("He", "She", "It", "he", "she", "it");// third person singular
+        List<String> demonsDetSg = Arrays.asList("This", "That", "this", "that");// singular demonstrative determiners
         if (nounSgPos.contains(posList.get(subjIndForVerbList.get(i)))) {
             return true;
         } else if (posList.get(subjIndForVerbList.get(i)).equals("PRP")) {
-            return thirdPersSg.contains(wordList.get(subjIndForVerbList.get(i)));
+            return thirdPersSg.contains(wordList.get(subjIndForVerbList.get(i)));// check if PRP is singular
         } else if (posList.get(subjIndForVerbList.get(0)).equals("DT")) {
-            return demonsDetSg.contains(wordList.get(subjIndForVerbList.get(0)));
+            return demonsDetSg.contains(wordList.get(subjIndForVerbList.get(0)));// check if DT is singular
         } else
-            return posList.get(subjIndForVerbList.get(0)).equals("CD") && wordList.get(subjIndForVerbList.get(0)).toLowerCase().equals("one");
+            return posList.get(subjIndForVerbList.get(0)).equals("CD") && wordList.get(subjIndForVerbList.get(0)).toLowerCase().equals("one");// if CD is the word 'one'
     }
 
+    /**
+     * part (c i) - get the subject-verb agreement score
+     *
+     * @param document annotated document
+     * @return score
+     */
     private static int getSubjectVerbAgrmntScore(Annotation document) {
-        List<String> verbPos = Arrays.asList("VB", "VBP", "VBZ");
-        List<String> infVerbPrecedesList = Arrays.asList("MD", "TO");
+        List<String> verbPos = Arrays.asList("VB", "VBP", "VBZ");// possible verbs that change with subject number
+        List<String> infVerbPrecedesList = Arrays.asList("MD", "TO");// tags preceding infinitival verb(VB)
         int mistakeCount = 0;
-        List<String> docTokenList = document.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.TextAnnotation.class)).collect(Collectors.toList());
+        List<String> docTokenList = document.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.TextAnnotation.class)).collect(Collectors.toList());// get tokens for whole essay
         for (CoreMap sentence : document.get(CoreAnnotations.SentencesAnnotation.class)) {
-            List<String> wordList = sentence.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.TextAnnotation.class)).collect(Collectors.toList());
-            List<String> posList = sentence.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.PartOfSpeechAnnotation.class)).collect(Collectors.toList());
-            List<Integer> verbIndexList = IntStream.range(0, posList.size()).filter(i -> verbPos.contains(posList.get(i))).boxed().collect(Collectors.toList());
-            Map<Integer, Set<Integer>> verbSubjSetMap = new HashMap<>();
-            SemanticGraph dependencyParse = sentence.get(SemanticGraphCoreAnnotations.EnhancedPlusPlusDependenciesAnnotation.class);
+            List<String> wordList = sentence.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.TextAnnotation.class)).collect(Collectors.toList());// get words for this sentence
+            List<String> posList = sentence.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.PartOfSpeechAnnotation.class)).collect(Collectors.toList());// get pos list
+            List<Integer> verbIndexList = IntStream.range(0, posList.size()).filter(i -> verbPos.contains(posList.get(i))).boxed().collect(Collectors.toList());// get all verb indices
+            Map<Integer, Set<Integer>> verbSubjSetMap = new HashMap<>();// verb index to subject indices set map
+            SemanticGraph dependencyParse = sentence.get(SemanticGraphCoreAnnotations.EnhancedPlusPlusDependenciesAnnotation.class);// get dependency graph
             for (int verbIndex : verbIndexList) {
                 Set<Integer> subjIndForVerbSet = new HashSet<>();
                 for (TypedDependency t : dependencyParse.typedDependencies()) {
-                    if (t.gov().index() - 1 == verbIndex) {
+                    if (t.gov().index() - 1 == verbIndex) {// if verb is the governor
                         if (t.reln().toString().equals("nsubj") && !t.dep().tag().equals("JJ")) {
-                            subjIndForVerbSet.add(t.dep().index() - 1);
+                            subjIndForVerbSet.add(t.dep().index() - 1);// get all the subject indices for dependents that are not adjectives
                         }
                     }
                 }
-                if (subjIndForVerbSet.isEmpty()) {
+                if (subjIndForVerbSet.isEmpty()) {// if subject list is empty, check for verb as dependent
                     for (TypedDependency t : dependencyParse.typedDependencies()) {
-                        if (t.dep().index() - 1 == verbIndex) {
-                            if (t.reln().toString().equals("cop") || t.reln().toString().equals("aux")) {
+                        if (t.dep().index() - 1 == verbIndex) {// if verb is the dependent
+                            if (t.reln().toString().equals("cop") || t.reln().toString().equals("aux")) {// check if the verb is copular or auxiliary
                                 for (TypedDependency c : dependencyParse.typedDependencies()) {
-                                    if (c.gov().index() - 1 == t.gov().index() - 1) {
+                                    if (c.gov().index() - 1 == t.gov().index() - 1) { // get the subject from the governor where the dependent was the verb <Ex: Ivan is the best dancer.>
                                         if (c.reln().toString().equals("nsubj") && !c.dep().tag().equals("JJ")) {
-                                            subjIndForVerbSet.add(c.dep().index() - 1);
+                                            subjIndForVerbSet.add(c.dep().index() - 1);// get the subject idices for dependents that are not adjectives
                                         }
                                     }
                                 }
@@ -282,26 +354,26 @@ public class AutograderMain {
                     }
                 }
                 if (!subjIndForVerbSet.isEmpty()) {
-                    verbSubjSetMap.put(verbIndex, subjIndForVerbSet);
+                    verbSubjSetMap.put(verbIndex, subjIndForVerbSet);// update the map
                 }
             }
 
             for (Map.Entry<Integer, Set<Integer>> entry : verbSubjSetMap.entrySet()) {
-                int vi = entry.getKey();
-                List<Integer> subjIndForVerbList = new ArrayList<>(entry.getValue());
-                Collections.sort(subjIndForVerbList);
+                int vi = entry.getKey();// verb index
+                List<Integer> subjIndForVerbList = new ArrayList<>(entry.getValue());// list of subjects
+                Collections.sort(subjIndForVerbList);// sort list of subjects
                 switch (posList.get(vi)) {
-                    case "VBP":
+                    case "VBP":// if VBP and subject is singular, count as mistake
                         if (isSubjListSnglr(subjIndForVerbList, posList, wordList, vi)) {
                             mistakeCount++;
                         }
                         break;
-                    case "VBZ":
+                    case "VBZ":// if VBZ and subject is plural, count as mistake
                         if (!isSubjListSnglr(subjIndForVerbList, posList, wordList, vi)) {
                             mistakeCount++;
                         }
                         break;
-                    case "VB":
+                    case "VB":// if VB is invalid, if subject is singular, count as mistake
                         if (!isValidInfVerbForm(infVerbPrecedesList, posList, vi, dependencyParse)) {
                             if (isSubjListSnglr(subjIndForVerbList, posList, wordList, vi)) {
                                 mistakeCount++;
@@ -311,55 +383,81 @@ public class AutograderMain {
                 }
             }
         }
-        double subjVerbPercent = (1 - (((double) mistakeCount) / docTokenList.size())) * 100;
-        List<Double> values = Arrays.asList(0.0, 97.70, 98.71, 99.28, 99.78);
-        return findIntervalIndex(subjVerbPercent, values) + 1;
+        double subjVerbPercent = (1 - (((double) mistakeCount) / docTokenList.size())) * 100;// get the subject-verb correctness ratio
+        List<Double> values = Arrays.asList(0.0, 97.70, 98.71, 99.28, 99.78);// thresholds based on mean and standard deviation
+        return findIntervalIndex(subjVerbPercent, values) + 1;// return 1-5 mapped score
     }
 
+    /**
+     * traverse the constituency parse tree for a sentence
+     *
+     * @param child tree node
+     * @param root root of tree
+     * @param sfAttrCountsMap contituent counts map
+     * @param allParentChildren all parent children sequences
+     */
     private static void traverseParseTree(Tree child, Tree root, Map<String, Integer> sfAttrCountsMap, Set<String> allParentChildren) {
-        if (sfAttrCountsMap.get("FRAGX") == 0) {
-            if ("FRAG".equals(child.label().value()) || "X".equals(child.label().value())) {
-                sfAttrCountsMap.put("FRAGX", 1);
+        if (sfAttrCountsMap.get("FRAGX") == 0) {// if sentence has no FRAG or X tag yet
+            if ("FRAG".equals(child.label().value()) || "X".equals(child.label().value())) {// check if this tree has FRAG or X tag
+                sfAttrCountsMap.put("FRAGX", 1);// count FRAG or X
                 return;
             } else if ("S".equals(child.label().value())) {
-                sfAttrCountsMap.put("S", sfAttrCountsMap.get("S") + 1);
+                sfAttrCountsMap.put("S", sfAttrCountsMap.get("S") + 1);// count for simple declarative clause
             } else if ("SBAR".equals(child.label().value())) {
-                if (!(sbarParents.contains(child.parent(root).value())) || child.getChildrenAsList().stream().noneMatch(node -> sbarChildren.contains(node.label().value()))) {
-                    sfAttrCountsMap.put("SBAR", sfAttrCountsMap.get("SBAR") + 1);
+                if (!(sbarParents.contains(child.parent(root).value())) || child.getChildrenAsList().stream().noneMatch(node -> sbarChildren.contains(node.label().value()))) {// check for SBAR invalid parents and valid children
+                    sfAttrCountsMap.put("SBAR", sfAttrCountsMap.get("SBAR") + 1);// count for invalid SBAR
                 }
             }
         }
 
-        extractAllParentChildSeqs(child, allParentChildren);
+        extractAllParentChildSeqs(child, allParentChildren);// extract all parent child sequences <Ex:S,NP,VP>
 
         for (Tree each : child.children()) {
-            traverseParseTree(each, root, sfAttrCountsMap, allParentChildren);
+            traverseParseTree(each, root, sfAttrCountsMap, allParentChildren);// recurse through tree
         }
 
     }
 
+    /**
+     * extract all the parent child constituents for the node
+     *
+     * @param child tree node
+     * @param allParentChildren all parent children sequences
+     */
     private static void extractAllParentChildSeqs(Tree child, Set<String> allParentChildren) {
-        if (isValidSentFormNode(child)) {
+        if (isValidSentFormNode(child)) {// check if node is valid for rules check (that was not covered in FRAG, X, SBAR checks)
             StringBuilder pcr = new StringBuilder();
-            List<String> children = child.getChildrenAsList().stream().filter(c -> isValidTag(c.label().value())).map(c -> c.label().value()).collect(Collectors.toList());
+            List<String> children = child.getChildrenAsList().stream().filter(c -> isValidTag(c.label().value())).map(c -> c.label().value()).collect(Collectors.toList());// get children as list
             if (children.size() > 0) {
-                pcr.append(child.label().value().split("-")[0]).append(",");
-                String s = children.stream().reduce((catStr1, catStr2) -> catStr1.split("-")[0] + "," + catStr2.split("-")[0]).get();
+                pcr.append(child.label().value().split("-")[0]).append(",");// append the parent
+                String s = children.stream().reduce((catStr1, catStr2) -> catStr1.split("-")[0] + "," + catStr2.split("-")[0]).get();// all children as concatenated string, separated by comma
                 pcr.append(s);
-                allParentChildren.add(pcr.toString());
+                allParentChildren.add(pcr.toString());// add to the set
             }
         }
     }
 
+    /**
+     * check if constituent tag is ignorable
+     *
+     * @param tag constituent tag
+     * @return boolean
+     */
     private static boolean isValidTag(String tag) {
         return !tagsToExclude.contains(tag);
     }
 
+    /**
+     * check if the node is valid for rules check
+     *
+     * @param parent parent node
+     * @return boolean
+     */
     private static boolean isValidSentFormNode(Tree parent) {
         boolean isValid = false;
-        if (!parent.isLeaf() && !Arrays.asList(new String[]{"ROOT", "FRAG", "X", "SBAR"}).contains(parent.label().value())) {
+        if (!parent.isLeaf() && !Arrays.asList(new String[]{"ROOT", "FRAG", "X", "SBAR"}).contains(parent.label().value())) {// check if parent was not covered in previous rules
             isValid = true;
-            for (Tree child : parent.getChildrenAsList()) {
+            for (Tree child : parent.getChildrenAsList()) {// check if child was not covered in previous rules
                 if (child.isLeaf() || Arrays.asList(new String[]{"ROOT", "FRAG", "X", "SBAR"}).contains(child.label().value())) {
                     isValid = false;
                 }
@@ -370,90 +468,107 @@ public class AutograderMain {
         return isValid;
     }
 
-    static int getSentenceFormationScore(Annotation document, String grade) {
-        int essayPenalty = 0;
+    /**
+     * part (c iii) - get sentence formation score
+     *
+     * @param document annotated document
+     * @return score
+     */
+    static int getSentenceFormationScore(Annotation document) {
         int numWrongSents = 0;
         int totalNumSents = 0;
         for (CoreMap sentence : document.get(CoreAnnotations.SentencesAnnotation.class)) {
-            totalNumSents++;
-            int fragxPenalty = 0;
-            int clausePenalty = 0;
-            int sbarPenalty = 0;
-            int startVerbPenalty = 0;
-            int missingWordsConstPenalty = 0;
-            Tree tree = sentence.get(TreeCoreAnnotations.TreeAnnotation.class);
-            Map<String, Integer> sfAttrCountsMap = new HashMap<>();
+            totalNumSents++;// count total number of sentences
+            boolean fragxPenalty = false;// FRAG/X penalty
+            boolean clausePenalty = false;// S penalty
+            boolean sbarPenalty = false;// SBAR penalty
+            boolean startVerbPenalty = false;// starting with verb penalty
+            boolean missingWordsConstPenalty = false;// missing words/constituents penalty
+            Tree tree = sentence.get(TreeCoreAnnotations.TreeAnnotation.class);// get the constituent parse tree
+            Map<String, Integer> sfAttrCountsMap = new HashMap<>();// map to count constituents FRAG, S, SBAR
             Set<String> allParentChildren = new HashSet<>();
             sfAttrCountsMap.put("FRAGX", 0);
             sfAttrCountsMap.put("S", 0);
             sfAttrCountsMap.put("SBAR", 0);
-            traverseParseTree(tree, tree, sfAttrCountsMap, allParentChildren);
-            List<String> posList = sentence.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.PartOfSpeechAnnotation.class)).collect(Collectors.toList());
+            traverseParseTree(tree, tree, sfAttrCountsMap, allParentChildren);// traverse the constituent parse tree
+            List<String> posList = sentence.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.PartOfSpeechAnnotation.class)).collect(Collectors.toList());// get the pos list
 
             if (sfAttrCountsMap.get("FRAGX") == 1) {
-                fragxPenalty = 5;
+                fragxPenalty = true;
             } else {
-                if (sentStartConflictVerbs.contains(posList.get(0))) {
-                    startVerbPenalty = 2;
+                if (sentStartConflictVerbs.contains(posList.get(0))) {// check if sentence starts with verb
+                    startVerbPenalty = true;
                 }
                 if (sfAttrCountsMap.get("S") == 0) {
-                    clausePenalty = 3;
+                    clausePenalty = true;
                 }
                 if (sfAttrCountsMap.get("SBAR") > 0) {
-                    sbarPenalty = 2 * sfAttrCountsMap.get("SBAR");
+                    sbarPenalty = true;
                 }
-                missingWordsConstPenalty = getMissingWordsConstPenalty(allParentChildren, grade);
+                if (getMissingWordsConstPenalty(allParentChildren) > 0) {
+                    missingWordsConstPenalty = true;
+                }
             }
-            int totalPenalty = fragxPenalty + clausePenalty + sbarPenalty + startVerbPenalty + missingWordsConstPenalty;
-            essayPenalty += totalPenalty;
-            if (totalPenalty > 0) {
+            boolean totalPenalty = fragxPenalty || clausePenalty || sbarPenalty || startVerbPenalty || missingWordsConstPenalty;
+            if (totalPenalty) {
                 numWrongSents++;
             }
 
         }
-        double sentFormMistakes = (numWrongSents / (double) totalNumSents);
-        List<Double> values = Arrays.asList(0.0, 0.418, 0.485, 0.660, 0.902);
-        return 5 - findIntervalIndex(sentFormMistakes, values);
+        double sentFormMistakes = (numWrongSents / (double) totalNumSents);// ratio of wrong sentences
+        List<Double> values = Arrays.asList(0.0, 0.418, 0.485, 0.660, 0.902);// thresholds based on mean and standard deviation
+        return 5 - findIntervalIndex(sentFormMistakes, values);// return 1-5 mapped score for correctness
     }
 
-    private static int getMissingWordsConstPenalty(Set<String> allParentChildren, String grade) {
+    /**
+     * get the number of missing words/constituents by counting rule violations
+     *
+     * @param allParentChildren all parent children sequences
+     * @return count
+     */
+    private static int getMissingWordsConstPenalty(Set<String> allParentChildren) {
         int missingWordConstCount = 0;
         try {
-                BufferedReader rulesReader = Files.newBufferedReader(Paths.get(resPathPrefix + "resources/treebank_rules.txt"));
-                String nextLine;
-                while ((nextLine = rulesReader.readLine()) != null) {
-                    allTreebankRules.add(nextLine);
-                }
+            BufferedReader rulesReader = Files.newBufferedReader(Paths.get(resPathPrefix + "resources/treebank_rules.txt"));// read trained rules for correct word/constituent sequences
+            String nextLine;
+            while ((nextLine = rulesReader.readLine()) != null) {
+                allTreebankRules.add(nextLine);// add all rules to the set
+            }
                 /*List<String> mistakesList = allParentChildren.stream().filter(seq -> !allTreebankRules.contains(seq) && grade.equals("high")).collect(Collectors.toList());
                 for (String m : mistakesList) {
                     allSeqMistakesFreq.put(m, allSeqMistakesFreq.getOrDefault(m, 0) + 1);
                 }*/
-                missingWordConstCount = (int) allParentChildren.stream().filter(seq -> !allTreebankRules.contains(seq)).count();
+            missingWordConstCount = (int) allParentChildren.stream().filter(seq -> !allTreebankRules.contains(seq)).count();// get rule violation counts
         } catch (IOException e) {
             e.printStackTrace();
         }
 
-        return missingWordConstCount;
+        return missingWordConstCount;// return count
     }
 
     /**
-     * MAIN
-     **/
-    // TODO add comments
+     * Essay Autograder: reads essay and grades high/low
+     *
+     * @param args cmd line args
+     */
     public static void main(String[] args) {
-        boolean rebuild = false;
+        boolean rebuild = false;// flag to rebuild features for training
         if (args.length > 1) {
             rebuild = Boolean.valueOf(args[1]);
         }
-        Map<String, Consumer> tasks = new HashMap<>();
-        tasks.put("test", bool -> testGrader());
-        tasks.put("train", (Consumer<Boolean>) AutograderMain::trainGrader);
+        Map<String, Consumer> tasks = new HashMap<>();// tasks map
+        tasks.put("test", bool -> testGrader());// test grader
+        tasks.put("train", (Consumer<Boolean>) AutograderMain::trainGrader);// train grader
         tasks.get(args[0]).accept(rebuild);
-//        testGrader();
     }
 
+    /**
+     * train essay grader
+     *
+     * @param buildFeatures boolean
+     */
     private static void trainGrader(boolean buildFeatures) {
-        if (buildFeatures) {
+        if (buildFeatures) {// build features
             try {
                 Reader reader = Files.newBufferedReader(Paths.get(ioPathPrefix + "input/training/index.csv"));
                 CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build();
@@ -474,7 +589,7 @@ public class AutograderMain {
                 String[] headerRecord = {"File", "a", "b", "c_i", "c_ii", "c_iii", "d_i", "d_ii", "class"};
                 csvWriter.writeNext(headerRecord);
 
-                while ((nextRecord = csvReader.readNext()) != null) {
+                while ((nextRecord = csvReader.readNext()) != null) {// read essays
                     BufferedReader essayReader = Files.newBufferedReader(Paths.get(ioPathPrefix + "input/training/essays/" + nextRecord[0]));
                     StringBuilder essay = new StringBuilder();
                     String line;
@@ -484,16 +599,16 @@ public class AutograderMain {
 
                     Annotation document = new Annotation(essay.toString());
                     pipeline.annotate(document);
-                    int lengthScore = getLengthScore(document);
-                    int spellScore = spellCheck(document);
-                    int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);
-                    int grammarScore = getGrammarScore(document);
-                    int sentFormScore = getSentenceFormationScore(document, nextRecord[2]);
+                    int lengthScore = getLengthScore(document);// part (a)
+                    int spellScore = spellCheck(document);// part (b)
+                    int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document); // part (c i)
+                    int grammarScore = getGrammarScore(document);// part (c ii)
+                    int sentFormScore = getSentenceFormationScore(document);// part (c iii)
 
 
                     System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + grammarScore + "\t" + sentFormScore + "\t" + nextRecord[2]);
 
-                    csvWriter.writeNext(new String[]{nextRecord[0], String.valueOf(lengthScore), String.valueOf(spellScore), String.valueOf(subjVerbAgrmntScore), String.valueOf(grammarScore), String.valueOf(sentFormScore), String.valueOf(0), String.valueOf(0), nextRecord[2]});
+                    csvWriter.writeNext(new String[]{nextRecord[0], String.valueOf(lengthScore), String.valueOf(spellScore), String.valueOf(subjVerbAgrmntScore), String.valueOf(grammarScore), String.valueOf(sentFormScore), String.valueOf(0), String.valueOf(0), nextRecord[2]});// save features to file
                     essayReader.close();
 
                 }
@@ -510,18 +625,18 @@ public class AutograderMain {
         }
         try {
 
-            Instances trainingDataset = getDataSet(resPathPrefix + "resources/train_features.csv");
-            Classifier classifier = new weka.classifiers.functions.SMO();
-            ((SMO) classifier).setOptions(weka.core.Utils.splitOptions("-C 1 -N 2"));
+            Instances trainingDataset = getDataSet(resPathPrefix + "resources/train_features.csv");//load features
+            Classifier classifier = new weka.classifiers.functions.SMO();// SMO classifier
+            ((SMO) classifier).setOptions(weka.core.Utils.splitOptions("-C 1 -N 2"));// set options C=1, N=2
             classifier.buildClassifier(trainingDataset);
             System.out.println(classifier);
 
-            Evaluation eval = new Evaluation(trainingDataset);
+            Evaluation eval = new Evaluation(trainingDataset);// evaluation for cross validation
 //            Instances testingDataSet = getDataSet("executable/resources/predict_data_set.csv");
 //            eval.evaluateModel(classifier, testingDataSet);
-            eval.crossValidateModel(classifier, trainingDataset, 10, new Random(1));
+            eval.crossValidateModel(classifier, trainingDataset, 10, new Random(1));// 10-fold cross validation
             System.out.println(eval.toSummaryString());
-            Instances predictDataset = getDataSet(resPathPrefix + "resources/predict_data_set.csv");
+            Instances predictDataset = getDataSet(resPathPrefix + "resources/predict_data_set.csv");// test predict
             for (Instance i : predictDataset) {
                 double value = classifier.classifyInstance(i);
                 if (i.classValue() != value) {
@@ -531,7 +646,7 @@ public class AutograderMain {
 
             }
 
-            weka.core.SerializationHelper.write(resPathPrefix + "resources/essay_grader.model", classifier);
+            weka.core.SerializationHelper.write(resPathPrefix + "resources/essay_grader.model", classifier);// save model
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -539,7 +654,13 @@ public class AutograderMain {
 
     }
 
-
+    /**
+     * load the features for training/testing
+     *
+     * @param filePath path to features file
+     * @return Instances
+     * @throws IOException file IO exception
+     */
     private static Instances getDataSet(String filePath) throws IOException {
         CSVLoader loader = new CSVLoader();
         loader.setSource(new File(filePath));
@@ -552,6 +673,10 @@ public class AutograderMain {
     }
 
     //TODO update function, grade
+
+    /**
+     * test grader
+     */
     private static void testGrader() {
         try {
             Reader reader = Files.newBufferedReader(Paths.get(ioPathPrefix + "input/testing/index.csv"));
@@ -565,7 +690,7 @@ public class AutograderMain {
 
             Writer writer = Files.newBufferedWriter(Paths.get(ioPathPrefix + "output/results.txt"));
 
-            while ((nextRecord = csvReader.readNext()) != null) {
+            while ((nextRecord = csvReader.readNext()) != null) {// read essays
                 BufferedReader essayReader = Files.newBufferedReader(Paths.get(ioPathPrefix + "input/testing/essays/" + nextRecord[0]));
                 StringBuilder essay = new StringBuilder();
                 String line;
@@ -575,12 +700,16 @@ public class AutograderMain {
 
                 Annotation document = new Annotation(essay.toString());
                 pipeline.annotate(document);
-                int lengthScore = getLengthScore(document);
-                int spellScore = spellCheck(document);
-                int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);
-                int grammarScore = getGrammarScore(document);
-                double finalScore = 2.1429 * lengthScore - 0.8571 * spellScore - 0.1429 * subjVerbAgrmntScore * 0.2857 * grammarScore;
-                String finalGrade = "unknown";
+                int lengthScore = getLengthScore(document);// part (a)
+                int spellScore = spellCheck(document);// part (b)
+                int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);// part (c i)
+                int grammarScore = getGrammarScore(document);// part (c ii)
+                int sentFormScore = getSentenceFormationScore(document);// part (c iii)
+
+                double finalScore = 2.1429 * lengthScore - 0.8571 * spellScore - 0.1429 * subjVerbAgrmntScore * 0.2857 * grammarScore; // final score function
+                double intercept = 6.00;// intercept
+                String finalGrade = (finalScore + intercept >= 1D) ? "high" : "low";
+
                 System.out.println(nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + (int) finalScore + ";" + finalGrade);
                 String scoreDetails = nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + 0 + ";" + 0 + ";" + (int) finalScore + ";" + finalGrade + "\n";
                 writer.write(scoreDetails);
