@@ -560,8 +560,8 @@ public class AutograderMain {
         if (!dictionary.isOpen()) dictionary.open();
         if (topic.contains("\t")) topic = topic.split("\t+")[1];
         Annotation topicAnnotation = processTopic(topic);
-        Set<String> topicNouns = getMainNouns(topicAnnotation);
-        Set<String> documentNouns = getMainNouns(document);
+        Collection<String> topicNouns = getMainNouns(topicAnnotation, false);
+        Collection<String> documentNouns = getMainNouns(document, true);
         Set<LinkedList<ISynset>> topicHyperTrees = topicNouns.stream().flatMap(word -> findRelationalTrees(word, AutograderMain::getHypernyms).stream()).collect(Collectors.toSet());
         Map<String, Double> wordScores = documentNouns.stream().collect(Collectors.toMap(Function.identity(), word -> getSimilarityScore(word, topicHyperTrees)));
         dictionary.close();
@@ -614,7 +614,10 @@ public class AutograderMain {
      * @return
      */
     private static Set<LinkedList<ISynset>> findRelationalTrees(String word, Function<ISynset, Set<ISynset>> relationFunction) {
-        return dictionary.getIndexWord(word, POS.NOUN).getWordIDs().stream()
+        List<IWordID> wordIDs = dictionary.getIndexWord(word, POS.NOUN).getWordIDs();
+        //Conisdering only the first synset.
+        wordIDs = Collections.singletonList(wordIDs.iterator().next());
+        return wordIDs.stream()
                 .map(wordID -> dictionary.getWord(wordID).getSynset())
                 .flatMap(synset -> findRelationalTrees(synset, relationFunction).stream())
                 .collect(Collectors.toSet());
@@ -669,14 +672,16 @@ public class AutograderMain {
 
     /**
      * @param document
+     * @param shouldRepeat
      * @return
      */
-    private static Set<String> getMainNouns(Annotation document) {
-        return document.get(CoreAnnotations.TokensAnnotation.class).stream()
+    private static Collection<String> getMainNouns(Annotation document, boolean shouldRepeat) {
+        List<String> mainNouns = document.get(CoreAnnotations.TokensAnnotation.class).stream()
                 .filter(token -> token.get(CoreAnnotations.PartOfSpeechAnnotation.class).contains("NN"))
                 .map(token -> token.get(CoreAnnotations.LemmaAnnotation.class))
                 .filter(word -> !stopwords_en.contains(word.toLowerCase()) && dictionary.getIndexWord(word, POS.NOUN) != null)
-                .collect(Collectors.toSet());
+                .collect(Collectors.toList());
+        return shouldRepeat ? mainNouns : new HashSet<>(mainNouns);
     }
 
     /**
