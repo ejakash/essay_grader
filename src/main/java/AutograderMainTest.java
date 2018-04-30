@@ -17,7 +17,7 @@ class AutograderMainTest {
 
     @Test
     void getGrammarScore() throws IOException {
-        String input = "806909.txt";
+        String input = "990384.txt";
 
         Properties props = new Properties();
         props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
@@ -32,5 +32,27 @@ class AutograderMainTest {
         pipeline.annotate(document);
 
         AutograderMain.getGrammarScore(document);
+    }
+
+    @Test
+    void getSentenceFormationScore() throws IOException {
+
+        String input = "990384.txt";
+
+        Properties props = new Properties();
+        props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
+        StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
+        BufferedReader essayReader = Files.newBufferedReader(Paths.get("input/training/essays/" + input));
+        StringBuilder essay = new StringBuilder();
+        String line;
+        while ((line = essayReader.readLine()) != null) {
+            essay.append(line).append("\n");
+        }
+//        String sent = "tired, because I travel a lot.";
+        Annotation document = new Annotation(essay.toString());
+        pipeline.annotate(document);
+
+        AutograderMain.getSentenceFormationScore(document,"high");
+
     }
 }

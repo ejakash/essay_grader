@@ -9,8 +9,11 @@ import edu.stanford.nlp.pipeline.Annotation;
 import edu.stanford.nlp.pipeline.StanfordCoreNLP;
 import edu.stanford.nlp.semgraph.SemanticGraph;
 import edu.stanford.nlp.semgraph.SemanticGraphCoreAnnotations;
+import edu.stanford.nlp.trees.Tree;
+import edu.stanford.nlp.trees.TreeCoreAnnotations;
 import edu.stanford.nlp.trees.TypedDependency;
 import edu.stanford.nlp.util.CoreMap;
+
 import weka.classifiers.Classifier;
 import weka.classifiers.evaluation.Evaluation;
 import weka.classifiers.functions.SMO;
@@ -33,16 +36,30 @@ public class AutograderMain {
 
     private static IDictionary dictionary = null;
     private static HashSet<String> closedWords_en = null;
+    private static String resPathPrefix = "";
+    private static String ioPathPrefix = "../";
+    private static List<String> sbarParents = Arrays.asList("S", "SINV", "VP", "NP");
+    private static List<String> sbarChildren = Arrays.asList("IN", "WHNP", "WHPP", "WHADJP", "WHADVP", "S");
+    private static List<String> sentStartConflictVerbs = Arrays.asList("VB", "VBN", "VBZ", "VBP", "VBD");
+    private static List<String> tagsToExclude = Arrays.asList(",", ".", "``", "''", ":", "#", "", "--", "$", "-NONE-", "-LRB-", "-RRB-", "POS");
+    private static Set<String> allTreebankRules = new HashSet<>();
+    private static Map<String, Integer> allSeqMistakesFreq = new HashMap<>();
+    private static Set<String> allSeqMistakes = new HashSet<>();
 
     static {
+        String execPath = System.getProperty("user.dir");
+        if (!execPath.contains("executable")) {
+            resPathPrefix = "executable/";
+            ioPathPrefix = "";
+        }
         try {
-            closedWords_en = new HashSet<>(Files.readAllLines(Paths.get("resources/libs/closed_class.txt")));
+            closedWords_en = new HashSet<>(Files.readAllLines(Paths.get(resPathPrefix + "resources/libs/closed_class.txt")));
         } catch (IOException e) {
             e.printStackTrace();
         }
         URL url = null;
         try {
-            url = new URL("file", null, "resources/libs/dict");
+            url = new URL("file", null, resPathPrefix + "resources/libs/dict");
         } catch (MalformedURLException e) {
             e.printStackTrace();
         }
@@ -299,9 +316,130 @@ public class AutograderMain {
         return findIntervalIndex(subjVerbPercent, values) + 1;
     }
 
+    private static void traverseParseTree(Tree child, Tree root, Map<String, Integer> sfAttrCountsMap, Set<String> allParentChildren) {
+        if (sfAttrCountsMap.get("FRAGX") == 0) {
+            if ("FRAG".equals(child.label().value()) || "X".equals(child.label().value())) {
+                sfAttrCountsMap.put("FRAGX", 1);
+                return;
+            } else if ("S".equals(child.label().value())) {
+                sfAttrCountsMap.put("S", sfAttrCountsMap.get("S") + 1);
+            } else if ("SBAR".equals(child.label().value())) {
+                if (!(sbarParents.contains(child.parent(root).value())) || child.getChildrenAsList().stream().noneMatch(node -> sbarChildren.contains(node.label().value()))) {
+                    sfAttrCountsMap.put("SBAR", sfAttrCountsMap.get("SBAR") + 1);
+                }
+            }
+        }
+
+        extractAllParentChildSeqs(child, allParentChildren);
+
+        for (Tree each : child.children()) {
+            traverseParseTree(each, root, sfAttrCountsMap, allParentChildren);
+        }
+
+    }
+
+    private static void extractAllParentChildSeqs(Tree child, Set<String> allParentChildren) {
+        if (isValidSentFormNode(child)) {
+            StringBuilder pcr = new StringBuilder();
+            List<String> children = child.getChildrenAsList().stream().filter(c -> isValidTag(c.label().value())).map(c -> c.label().value()).collect(Collectors.toList());
+            if (children.size() > 0) {
+                pcr.append(child.label().value().split("-")[0]).append(",");
+                String s = children.stream().reduce((catStr1, catStr2) -> catStr1.split("-")[0] + "," + catStr2.split("-")[0]).get();
+                pcr.append(s);
+                allParentChildren.add(pcr.toString());
+            }
+        }
+    }
+
+    private static boolean isValidTag(String tag) {
+        return !tagsToExclude.contains(tag);
+    }
+
+    private static boolean isValidSentFormNode(Tree parent) {
+        boolean isValid = false;
+        if (!parent.isLeaf() && !Arrays.asList(new String[]{"ROOT", "FRAG", "X", "SBAR"}).contains(parent.label().value())) {
+            isValid = true;
+            for (Tree child : parent.getChildrenAsList()) {
+                if (child.isLeaf() || Arrays.asList(new String[]{"ROOT", "FRAG", "X", "SBAR"}).contains(child.label().value())) {
+                    isValid = false;
+                }
+            }
+
+
+        }
+        return isValid;
+    }
+
+    static int getSentenceFormationScore(Annotation document, String grade) {
+        int essayPenalty = 0;
+        int numWrongSents = 0;
+        int totalNumSents = 0;
+        for (CoreMap sentence : document.get(CoreAnnotations.SentencesAnnotation.class)) {
+            totalNumSents++;
+            int fragxPenalty = 0;
+            int clausePenalty = 0;
+            int sbarPenalty = 0;
+            int startVerbPenalty = 0;
+            int missingWordsConstPenalty = 0;
+            Tree tree = sentence.get(TreeCoreAnnotations.TreeAnnotation.class);
+            Map<String, Integer> sfAttrCountsMap = new HashMap<>();
+            Set<String> allParentChildren = new HashSet<>();
+            sfAttrCountsMap.put("FRAGX", 0);
+            sfAttrCountsMap.put("S", 0);
+            sfAttrCountsMap.put("SBAR", 0);
+            traverseParseTree(tree, tree, sfAttrCountsMap, allParentChildren);
+            List<String> posList = sentence.get(CoreAnnotations.TokensAnnotation.class).stream().map(token -> token.get(CoreAnnotations.PartOfSpeechAnnotation.class)).collect(Collectors.toList());
+
+            if (sfAttrCountsMap.get("FRAGX") == 1) {
+                fragxPenalty = 5;
+            } else {
+                if (sentStartConflictVerbs.contains(posList.get(0))) {
+                    startVerbPenalty = 2;
+                }
+                if (sfAttrCountsMap.get("S") == 0) {
+                    clausePenalty = 3;
+                }
+                if (sfAttrCountsMap.get("SBAR") > 0) {
+                    sbarPenalty = 2 * sfAttrCountsMap.get("SBAR");
+                }
+                missingWordsConstPenalty = getMissingWordsConstPenalty(allParentChildren, grade);
+            }
+            int totalPenalty = fragxPenalty + clausePenalty + sbarPenalty + startVerbPenalty + missingWordsConstPenalty;
+            essayPenalty += totalPenalty;
+            if (totalPenalty > 0) {
+                numWrongSents++;
+            }
+
+        }
+        double sentFormMistakes = (numWrongSents / (double) totalNumSents);
+        List<Double> values = Arrays.asList(0.0, 0.418, 0.485, 0.660, 0.902);
+        return 5 - findIntervalIndex(sentFormMistakes, values);
+    }
+
+    private static int getMissingWordsConstPenalty(Set<String> allParentChildren, String grade) {
+        int missingWordConstCount = 0;
+        try {
+                BufferedReader rulesReader = Files.newBufferedReader(Paths.get(resPathPrefix + "resources/treebank_rules.txt"));
+                String nextLine;
+                while ((nextLine = rulesReader.readLine()) != null) {
+                    allTreebankRules.add(nextLine);
+                }
+                /*List<String> mistakesList = allParentChildren.stream().filter(seq -> !allTreebankRules.contains(seq) && grade.equals("high")).collect(Collectors.toList());
+                for (String m : mistakesList) {
+                    allSeqMistakesFreq.put(m, allSeqMistakesFreq.getOrDefault(m, 0) + 1);
+                }*/
+                missingWordConstCount = (int) allParentChildren.stream().filter(seq -> !allTreebankRules.contains(seq)).count();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        return missingWordConstCount;
+    }
+
     /**
      * MAIN
      **/
+    // TODO add comments
     public static void main(String[] args) {
         boolean rebuild = false;
         if (args.length > 1) {
@@ -317,7 +455,7 @@ public class AutograderMain {
     private static void trainGrader(boolean buildFeatures) {
         if (buildFeatures) {
             try {
-                Reader reader = Files.newBufferedReader(Paths.get("../input/training/index.csv"));
+                Reader reader = Files.newBufferedReader(Paths.get(ioPathPrefix + "input/training/index.csv"));
                 CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build();
                 CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(csvParser).withSkipLines(1).build();
                 String[] nextRecord;
@@ -326,7 +464,7 @@ public class AutograderMain {
                 props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
                 StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
 
-                Writer writer = Files.newBufferedWriter(Paths.get("resources/train_features.csv"));
+                Writer writer = Files.newBufferedWriter(Paths.get(resPathPrefix + "resources/train_features.csv"));
 
                 CSVWriter csvWriter = new CSVWriter(writer,
                         CSVWriter.DEFAULT_SEPARATOR,
@@ -337,7 +475,7 @@ public class AutograderMain {
                 csvWriter.writeNext(headerRecord);
 
                 while ((nextRecord = csvReader.readNext()) != null) {
-                    BufferedReader essayReader = Files.newBufferedReader(Paths.get("../input/training/essays/" + nextRecord[0]));
+                    BufferedReader essayReader = Files.newBufferedReader(Paths.get(ioPathPrefix + "input/training/essays/" + nextRecord[0]));
                     StringBuilder essay = new StringBuilder();
                     String line;
                     while ((line = essayReader.readLine()) != null) {
@@ -350,12 +488,20 @@ public class AutograderMain {
                     int spellScore = spellCheck(document);
                     int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);
                     int grammarScore = getGrammarScore(document);
-                    System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + grammarScore + "\t" + nextRecord[2]);
+                    int sentFormScore = getSentenceFormationScore(document, nextRecord[2]);
 
-                    csvWriter.writeNext(new String[]{nextRecord[0], String.valueOf(lengthScore), String.valueOf(spellScore), String.valueOf(subjVerbAgrmntScore), String.valueOf(grammarScore), String.valueOf(0), String.valueOf(0), String.valueOf(0), nextRecord[2]});
+
+                    System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + grammarScore + "\t" + sentFormScore + "\t" + nextRecord[2]);
+
+                    csvWriter.writeNext(new String[]{nextRecord[0], String.valueOf(lengthScore), String.valueOf(spellScore), String.valueOf(subjVerbAgrmntScore), String.valueOf(grammarScore), String.valueOf(sentFormScore), String.valueOf(0), String.valueOf(0), nextRecord[2]});
                     essayReader.close();
 
                 }
+                /*for(Map.Entry<String, Integer> entry: allSeqMistakesFreq.entrySet()){
+                    if(entry.getValue() > 2){
+                        allSeqMistakes.add(entry.getKey());
+                    }
+                }*/
                 writer.close();
                 reader.close();
             } catch (IOException e) {
@@ -364,7 +510,7 @@ public class AutograderMain {
         }
         try {
 
-            Instances trainingDataset = getDataSet("resources/train_features.csv");
+            Instances trainingDataset = getDataSet(resPathPrefix + "resources/train_features.csv");
             Classifier classifier = new weka.classifiers.functions.SMO();
             ((SMO) classifier).setOptions(weka.core.Utils.splitOptions("-C 1 -N 2"));
             classifier.buildClassifier(trainingDataset);
@@ -375,7 +521,7 @@ public class AutograderMain {
 //            eval.evaluateModel(classifier, testingDataSet);
             eval.crossValidateModel(classifier, trainingDataset, 10, new Random(1));
             System.out.println(eval.toSummaryString());
-            Instances predictDataset = getDataSet("resources/predict_data_set.csv");
+            Instances predictDataset = getDataSet(resPathPrefix + "resources/predict_data_set.csv");
             for (Instance i : predictDataset) {
                 double value = classifier.classifyInstance(i);
                 if (i.classValue() != value) {
@@ -385,13 +531,14 @@ public class AutograderMain {
 
             }
 
-            weka.core.SerializationHelper.write("resources/essay_grader.model", classifier);
+            weka.core.SerializationHelper.write(resPathPrefix + "resources/essay_grader.model", classifier);
         } catch (Exception e) {
             e.printStackTrace();
         }
 
 
     }
+
 
     private static Instances getDataSet(String filePath) throws IOException {
         CSVLoader loader = new CSVLoader();
@@ -404,9 +551,10 @@ public class AutograderMain {
         return dataset;
     }
 
+    //TODO update function, grade
     private static void testGrader() {
         try {
-            Reader reader = Files.newBufferedReader(Paths.get("../input/testing/index.csv"));
+            Reader reader = Files.newBufferedReader(Paths.get(ioPathPrefix + "input/testing/index.csv"));
             CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build();
             CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(csvParser).withSkipLines(1).build();
             String[] nextRecord;
@@ -415,10 +563,10 @@ public class AutograderMain {
             props.setProperty("annotators", "tokenize,ssplit,pos,lemma,parse");
             StanfordCoreNLP pipeline = new StanfordCoreNLP(props);
 
-            Writer writer = Files.newBufferedWriter(Paths.get("../output/results.txt"));
+            Writer writer = Files.newBufferedWriter(Paths.get(ioPathPrefix + "output/results.txt"));
 
             while ((nextRecord = csvReader.readNext()) != null) {
-                BufferedReader essayReader = Files.newBufferedReader(Paths.get("../input/testing/essays/" + nextRecord[0]));
+                BufferedReader essayReader = Files.newBufferedReader(Paths.get(ioPathPrefix + "input/testing/essays/" + nextRecord[0]));
                 StringBuilder essay = new StringBuilder();
                 String line;
                 while ((line = essayReader.readLine()) != null) {
@@ -433,7 +581,7 @@ public class AutograderMain {
                 int grammarScore = getGrammarScore(document);
                 double finalScore = 2.1429 * lengthScore - 0.8571 * spellScore - 0.1429 * subjVerbAgrmntScore * 0.2857 * grammarScore;
                 String finalGrade = "unknown";
-                System.out.println(nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + (int)finalScore + ";" + finalGrade);
+                System.out.println(nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + (int) finalScore + ";" + finalGrade);
                 String scoreDetails = nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + 0 + ";" + 0 + ";" + (int) finalScore + ";" + finalGrade + "\n";
                 writer.write(scoreDetails);
                 essayReader.close();
@@ -443,4 +591,5 @@ public class AutograderMain {
             e.printStackTrace();
         }
     }
+
 }

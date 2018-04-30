@@ -23,6 +23,18 @@ class BadPosSequence {
         return badPosSequences.stream().filter(sequence -> Collections.indexOfSubList(posWords, sequence) != -1).collect(Collectors.toList());
     }
 
+/*    static int getBadSentFormSequenceCount(CoreMap sentence) {
+        List<PosWord> posWords = sentence.get(TokensAnnotation.class).stream().map(PosWord::new).collect(Collectors.toList());
+        return (int) badSentFormPosSequences.stream().filter(sequence -> Collections.indexOfSubList(posWords, sequence) != -1).count();
+    }
+
+    static List<List<PosWord>> badSentFormPosSequences = createPosWords(Arrays.asList(
+            "BECAUSE,VBG",
+            "MD,MD",
+            "TO,MD",
+            "MD,TO",
+            "TO,TO"));*/
+
     static List<List<PosWord>> badPosSequences = createPosWords(Arrays.asList(
             "MD,MD",
             "MD,VB,VB",
@@ -94,6 +106,7 @@ class BadPosSequence {
     static class PosWord {
         String word;
         String pos;
+
         PosWord(String word, String pos) {
             this.word = word;
             this.pos = pos;
@@ -105,11 +118,10 @@ class BadPosSequence {
         }
 
         PosWord(String wordOrPos) {
-            if(pennTagSet.contains(wordOrPos)) {
+            if (pennTagSet.contains(wordOrPos)) {
                 this.pos = normalizeCase(wordOrPos);
                 this.word = null;
-            }
-            else {
+            } else {
                 this.pos = null;
                 this.word = normalizeCase(wordOrPos);
             }
@@ -121,10 +133,10 @@ class BadPosSequence {
 
         @Override
         public boolean equals(Object obj) {
-            if(obj instanceof PosWord) {
+            if (obj instanceof PosWord) {
                 PosWord word = (PosWord) obj;
-                if(this.word == null) return this.pos.equals(word.pos);
-                if(this.pos == null) return this.word.equals(word.word);
+                if (this.word == null) return this.pos.equals(word.pos);
+                if (this.pos == null) return this.word.equals(word.word);
                 return this.word.equals(word.word) && this.pos.equals(word.pos);
             }
             return super.equals(obj);
@@ -132,10 +144,10 @@ class BadPosSequence {
 
         @Override
         public int hashCode() {
-            if(word == null) {
+            if (word == null) {
                 return ("null" + pos).hashCode();
             }
-            if(pos == null) {
+            if (pos == null) {
                 return (word + "null").hashCode();
             }
             return ("word" + word + "pos" + pos).hashCode();
@@ -143,8 +155,8 @@ class BadPosSequence {
 
         @Override
         public String toString() {
-            if(word == null) return pos;
-            if(pos == null) return word;
+            if (word == null) return pos;
+            if (pos == null) return word;
             return word + "|" + pos;
         }
     }
