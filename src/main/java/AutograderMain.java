@@ -556,17 +556,17 @@ public class AutograderMain {
      * @return
      * @throws IOException
      */
-    private static int getTopicRelevanceScore(Annotation document, String topic) throws IOException {
+    private static Double getTopicRelevanceScore(Annotation document, String topic) throws IOException {
         if (!dictionary.isOpen()) dictionary.open();
         if (topic.contains("\t")) topic = topic.split("\t+")[1];
         Annotation topicAnnotation = processTopic(topic);
         Collection<String> topicNouns = getMainNouns(topicAnnotation, false);
         Collection<String> documentNouns = getMainNouns(document, true);
         Set<LinkedList<ISynset>> topicHyperTrees = topicNouns.stream().flatMap(word -> findRelationalTrees(word, AutograderMain::getHypernyms).stream()).collect(Collectors.toSet());
-        Map<String, Double> wordScores = documentNouns.stream().collect(Collectors.toMap(Function.identity(), word -> getSimilarityScore(word, topicHyperTrees)));
+        Map<String, Double> wordScores = new HashSet<>(documentNouns).stream().collect(Collectors.toMap(Function.identity(), word -> getSimilarityScore(word, topicHyperTrees)));
         dictionary.close();
-        if (wordScores.isEmpty()) return 0;
-        return ((Double) wordScores.values().stream().mapToDouble(value -> value).average().getAsDouble()).intValue();
+        if (wordScores.isEmpty()) return 0D;
+        return documentNouns.stream().mapToDouble(wordScores::get).average().getAsDouble();
     }
 
     /**
@@ -589,13 +589,13 @@ public class AutograderMain {
      * @return
      */
     private static Double getSimilarityScore(LinkedList<ISynset> wordTree, LinkedList<ISynset> topicTree) {
-        Double max_score = 3D;
+        Double max_score = 5D;
         if (topicTree.getLast().equals(wordTree.getLast())) return max_score;
         double score = 0D;
         Set<ISynset> wordNetTopic = wordTree.getLast().getRelatedMap().getOrDefault(Pointer.TOPIC, Generics.newArrayList()).stream().map(id -> dictionary.getSynset(id)).collect(Collectors.toSet());
-        if (Sets.intersects(wordNetTopic, new HashSet<>(topicTree))) score += max_score;
+        if (Sets.intersects(wordNetTopic, new HashSet<>(topicTree))) return max_score;
 
-        if (wordTree.contains(topicTree.getLast()) || topicTree.contains(wordTree.getLast())) score += max_score;
+        if (wordTree.contains(topicTree.getLast()) || topicTree.contains(wordTree.getLast())) return max_score;
 
         Set<ISynset> commonNodes = Sets.intersection(new HashSet<>(wordTree), new HashSet<>(topicTree));
         if (commonNodes.isEmpty()) return score;
@@ -603,7 +603,7 @@ public class AutograderMain {
         int depth1 = wordTree.indexOf(lowestCommonNode) + 1;
         int depth2 = topicTree.indexOf(lowestCommonNode) + 1;
         int depth = depth1 < depth2 ? depth1 : depth2;
-        score += (double) (6 * depth) / (wordTree.size() + topicTree.size());
+        score += max_score * 2 * depth / (wordTree.size() + topicTree.size());
 
         return score < max_score ? score : max_score;
     }
@@ -755,7 +755,7 @@ public class AutograderMain {
                     int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document); // part (c i)
                     int grammarScore = getGrammarScore(document);// part (c ii)
                     int sentFormScore = getSentenceFormationScore(document);// part (c iii)
-                    int topicScore = getTopicRelevanceScore(document, nextRecord[1]);// part (d ii)
+                    double topicScore = getTopicRelevanceScore(document, nextRecord[1]);// part (d ii)
 
                     System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + grammarScore + "\t" + sentFormScore + "\t" + 0 + "\t" + topicScore + "\t" + nextRecord[2]);
 
@@ -857,7 +857,7 @@ public class AutograderMain {
                 int grammarScore = getGrammarScore(document);// part (c ii)
                 int sentFormScore = getSentenceFormationScore(document);// part (c iii)
 
-                int topicScore = getTopicRelevanceScore(document, nextRecord[1]);
+                double topicScore = getTopicRelevanceScore(document, nextRecord[1]);
                 double finalScore = 2.1429 * lengthScore - 0.8571 * spellScore - 0.1429 * subjVerbAgrmntScore * 0.2857 * grammarScore; // final score function
                 double intercept = 6.00;// intercept
                 String finalGrade = (finalScore + intercept >= 1D) ? "high" : "low";
