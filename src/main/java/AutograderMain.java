@@ -566,7 +566,10 @@ public class AutograderMain {
         Map<String, Double> wordScores = new HashSet<>(documentNouns).stream().collect(Collectors.toMap(Function.identity(), word -> getSimilarityScore(word, topicHyperTrees)));
         dictionary.close();
         if (wordScores.isEmpty()) return 0D;
-        return documentNouns.stream().mapToDouble(wordScores::get).average().getAsDouble();
+        double thresholdPercentage = .80D;
+        return documentNouns.stream().map(wordScores::get).sorted(Comparator.naturalOrder())
+                .skip((int)(documentNouns.size() * (1D - thresholdPercentage)))
+                .mapToDouble(Double::doubleValue).average().getAsDouble();
     }
 
     /**
