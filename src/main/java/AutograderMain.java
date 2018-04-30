@@ -556,7 +556,7 @@ public class AutograderMain {
      * @return
      * @throws IOException
      */
-    private static Double getTopicRelevanceScore(Annotation document, String topic) throws IOException {
+    private static int getTopicRelevanceScore(Annotation document, String topic) throws IOException {
         if (!dictionary.isOpen()) dictionary.open();
         if (topic.contains("\t")) topic = topic.split("\t+")[1];
         Annotation topicAnnotation = processTopic(topic);
@@ -565,11 +565,12 @@ public class AutograderMain {
         Set<LinkedList<ISynset>> topicHyperTrees = topicNouns.stream().flatMap(word -> findRelationalTrees(word, AutograderMain::getHypernyms).stream()).collect(Collectors.toSet());
         Map<String, Double> wordScores = new HashSet<>(documentNouns).stream().collect(Collectors.toMap(Function.identity(), word -> getSimilarityScore(word, topicHyperTrees)));
         dictionary.close();
-        if (wordScores.isEmpty()) return 0D;
+        if (wordScores.isEmpty()) return 0;
         double thresholdPercentage = .80D;
-        return documentNouns.stream().map(wordScores::get).sorted(Comparator.naturalOrder())
-                .skip((int)(documentNouns.size() * (1D - thresholdPercentage)))
-                .mapToDouble(Double::doubleValue).average().getAsDouble();
+        return ((Long) Math.round((documentNouns.stream().map(wordScores::get).sorted(Comparator.naturalOrder())
+                .skip((int) (documentNouns.size() * (1D - thresholdPercentage)))
+                .mapToDouble(Double::doubleValue).average().getAsDouble())))
+                .intValue();
     }
 
     /**
@@ -580,8 +581,7 @@ public class AutograderMain {
     private static Double getSimilarityScore(String word, Set<LinkedList<ISynset>> topicHyperTrees) {
         Set<LinkedList<ISynset>> wordHyperTrees = findRelationalTrees(word, AutograderMain::getHypernyms);
         if (!topicHyperTrees.isEmpty() && !wordHyperTrees.isEmpty()) {
-            Double score = Sets.cross(wordHyperTrees, topicHyperTrees).stream().map(treePair -> getSimilarityScore(treePair.first, treePair.second)).max(Comparator.naturalOrder()).get();
-            return score;
+            return Sets.cross(wordHyperTrees, topicHyperTrees).stream().map(treePair -> getSimilarityScore(treePair.first, treePair.second)).max(Comparator.naturalOrder()).get();
         }
         return 0D;
     }
@@ -603,9 +603,7 @@ public class AutograderMain {
         Set<ISynset> commonNodes = Sets.intersection(new HashSet<>(wordTree), new HashSet<>(topicTree));
         if (commonNodes.isEmpty()) return score;
         ISynset lowestCommonNode = commonNodes.stream().max(Comparator.comparingInt(wordTree::indexOf)).get();
-        int depth1 = wordTree.indexOf(lowestCommonNode) + 1;
-        int depth2 = topicTree.indexOf(lowestCommonNode) + 1;
-        int depth = depth1 < depth2 ? depth1 : depth2;
+        int depth = Math.min(wordTree.indexOf(lowestCommonNode) + 1, topicTree.indexOf(lowestCommonNode) + 1);
         score += max_score * 2 * depth / (wordTree.size() + topicTree.size());
 
         return score < max_score ? score : max_score;
