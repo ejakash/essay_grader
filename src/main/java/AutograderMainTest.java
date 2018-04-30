@@ -52,7 +52,7 @@ class AutograderMainTest {
         Annotation document = new Annotation(essay.toString());
         pipeline.annotate(document);
 
-        AutograderMain.getSentenceFormationScore(document,"high");
+        AutograderMain.getSentenceFormationScore(document);
 
     }
 }
