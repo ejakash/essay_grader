@@ -551,10 +551,14 @@ public class AutograderMain {
     }
 
     /**
-     * @param document
-     * @param topic
-     * @return
-     * @throws IOException
+     * Obtains the nouns from both topic and document.
+     * Compute the score for each word in the document.
+     * Score is computed for a pair of words one from document and one from topic. The highest score is assigned to the document word.
+     * Top 80% of these scores are take and are averaged and rounded to generate the final score of the document.
+     * @param document The input Document
+     * @param topic The topic of the document
+     * @return The Score value for topic relevancy of the document.
+     * @throws IOException In case the word net dictionary cannot be opened.
      */
     private static int getTopicRelevanceScore(Annotation document, String topic) throws IOException {
         if (!dictionary.isOpen()) dictionary.open();
@@ -574,9 +578,13 @@ public class AutograderMain {
     }
 
     /**
-     * @param word
-     * @param topicHyperTrees
-     * @return
+     * Computes the possible hyperTrees (defined below) of the word. Topic hyperTrees are passes to avoid recalculation at each step
+     * Take all pair of hyperTrees one from word hyper trees and one from topic hyperTrees and compute the similarity score.
+     * return the highest value.
+     * @param word word from the document
+     * @param topicHyperTrees linked list of a set of hyponyms from Entity (WordNet root node) to the topic word.
+     *                        example ->  entity < physical_entity < object < whole < living_thing < organism < animal< domestic_animal < dog
+     * @return Similarity score for the particular word.
      */
     private static Double getSimilarityScore(String word, Set<LinkedList<ISynset>> topicHyperTrees) {
         Set<LinkedList<ISynset>> wordHyperTrees = findRelationalTrees(word, AutograderMain::getHypernyms);
@@ -587,9 +595,12 @@ public class AutograderMain {
     }
 
     /**
-     * @param wordTree
-     * @param topicTree
-     * @return
+     * If topic and word are equal, topic is a direct hypernym of the word or topic or its hypernym is present in the wordNet returned topic
+     * maximum score is returned.
+     * Else WUPalmer algorithm is used and scaled to max score. It is basically 2 * (depth of lowest common ancestor) / sum of depth of both the list.
+     * @param wordTree Word hyperTree. HyperTree have been defined above.
+     * @param topicTree Topic hyperTree. HyperTree have been defined above.
+     * @return similarity score between the hyperTrees.
      */
     private static Double getSimilarityScore(LinkedList<ISynset> wordTree, LinkedList<ISynset> topicTree) {
         Double max_score = 5D;
@@ -610,9 +621,11 @@ public class AutograderMain {
     }
 
     /**
-     * @param word
-     * @param relationFunction
-     * @return
+     * This function is currently used to find the hyperTrees (Defined above). If a word is input, it is converted to synset first.
+     * Then the expansion function  applied on the synset and the new synsets are added expansion function is called on then recursively.
+     * @param word word to be expanded
+     * @param relationFunction expansion function. It could be hypernym expansion, meronym expansion or any other synset based expansion.
+     * @return All possible trees with expansion function applied on the synset of the word.
      */
     private static Set<LinkedList<ISynset>> findRelationalTrees(String word, Function<ISynset, Set<ISynset>> relationFunction) {
         List<IWordID> wordIDs = dictionary.getIndexWord(word, POS.NOUN).getWordIDs();
@@ -625,9 +638,13 @@ public class AutograderMain {
     }
 
     /**
-     * @param word
-     * @param relationFunction
-     * @return
+     * Expansion function is applied on the given ISynset. Suppose it returns n ISynset, then n linked lists are created
+     * with each ISynset attached to the given ISynset in each respective list. Then the expansion function is recursively
+     * called on each of these new ISynset expanding the lists even further. Once all the lists reach a terminal node
+     * all these lists are returned.
+     * @param word ISynset of the word to be expanded.
+     * @param relationFunction expansion function. It could be hypernym expansion, meronym expansion or any other synset based expansion.
+     * @return All possible trees with expansion function applied on the synset of the word.
      */
     private static Set<LinkedList<ISynset>> findRelationalTrees(ISynset word, Function<ISynset, Set<ISynset>> relationFunction) {
         Set<LinkedList<ISynset>> incompleteHyperTrees = new HashSet<>(Collections.singletonList(new LinkedList<>(Collections.singletonList(word))));
@@ -646,25 +663,27 @@ public class AutograderMain {
     }
 
     /**
-     * @param head
-     * @return
+     * Return the wordNet based hypernyms of ISynset node.
+     * @param head ISynset node
+     * @return The hypernyms of the ISynset node.
      */
     private static Set<ISynset> getHypernyms(ISynset head) {
         return Sets.union(new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.HYPERNYM, new ArrayList<>())), new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.HYPERNYM_INSTANCE, new ArrayList<>()))).stream().map(dictionary::getSynset).collect(Collectors.toSet());
     }
 
     /**
-     * @param head
-     * @param relation
-     * @return
+     * Returns the set of ISynset nodes after applying the relation function.
+     * @param head ISynset node
+     * @param relation WordNet based ISynset Relation. Could be hypernym, hyponym etc.
+     * @return The set of ISynset nodes after applying the relation function.
      */
     private static Set<ISynset> getRelated(ISynset head, Pointer relation) {
         return new HashSet<>(head.getRelatedMap().getOrDefault(relation, new ArrayList<>())).stream().map(dictionary::getSynset).collect(Collectors.toSet());
     }
 
     /**
-     * @param head
-     * @return
+     * @param head ISynset node
+     * @return The meronyms of the ISynset node.
      */
     private static Set<ISynset> getMeronyms(ISynset head) {
         Set<ISynsetID> partUnion = Sets.union(new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.MERONYM_MEMBER, new ArrayList<>())), new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.MERONYM_PART, new ArrayList<>())));
@@ -672,9 +691,10 @@ public class AutograderMain {
     }
 
     /**
-     * @param document
-     * @param shouldRepeat
-     * @return
+     * It takes the tokens of the document and applies a noun filter, stopWord filter and wordNet lookup filter to avoid mis-spelt words.
+     * @param document The document after its annotated by Stanford NLP
+     * @param shouldRepeat If Should Repeat, returns a list. Else a set.
+     * @return Return a collection of nouns in the documents.
      */
     private static Collection<String> getMainNouns(Annotation document, boolean shouldRepeat) {
         List<String> mainNouns = document.get(CoreAnnotations.TokensAnnotation.class).stream()
@@ -686,8 +706,9 @@ public class AutograderMain {
     }
 
     /**
-     * @param topic
-     * @return
+     * Run stanford NLP tool and return the annotation with POS and lemmatization processed.
+     * @param topic The topic to the processed
+     * @return processed topic Annotation.
      */
     private static Annotation processTopic(String topic) {
         Properties props = new Properties();
@@ -756,7 +777,7 @@ public class AutograderMain {
                     int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document); // part (c i)
                     int grammarScore = getGrammarScore(document);// part (c ii)
                     int sentFormScore = getSentenceFormationScore(document);// part (c iii)
-                    double topicScore = getTopicRelevanceScore(document, nextRecord[1]);// part (d ii)
+                    int topicScore = getTopicRelevanceScore(document, nextRecord[1]);// part (d ii)
 
                     System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + grammarScore + "\t" + sentFormScore + "\t" + 0 + "\t" + topicScore + "\t" + nextRecord[2]);
 
@@ -858,7 +879,7 @@ public class AutograderMain {
                 int grammarScore = getGrammarScore(document);// part (c ii)
                 int sentFormScore = getSentenceFormationScore(document);// part (c iii)
 
-                double topicScore = getTopicRelevanceScore(document, nextRecord[1]);
+                int topicScore = getTopicRelevanceScore(document, nextRecord[1]);
                 double finalScore = 2.1429 * lengthScore - 0.8571 * spellScore - 0.1429 * subjVerbAgrmntScore * 0.2857 * grammarScore; // final score function
                 double intercept = 6.00;// intercept
                 String finalGrade = (finalScore + intercept >= 1D) ? "high" : "low";
