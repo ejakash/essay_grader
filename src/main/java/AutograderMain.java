@@ -595,9 +595,6 @@ public class AutograderMain {
     }
 
     /**
-     * If topic and word are equal, topic is a direct hypernym of the word or topic or its hypernym is present in the wordNet returned topic
-     * maximum score is returned.
-     * Else WUPalmer algorithm is used and scaled to max score. It is basically 2 * (depth of lowest common ancestor) / sum of depth of both the list.
      * @param wordTree Word hyperTree. HyperTree have been defined above.
      * @param topicTree Topic hyperTree. HyperTree have been defined above.
      * @return similarity score between the hyperTrees.
@@ -669,25 +666,6 @@ public class AutograderMain {
      */
     private static Set<ISynset> getHypernyms(ISynset head) {
         return Sets.union(new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.HYPERNYM, new ArrayList<>())), new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.HYPERNYM_INSTANCE, new ArrayList<>()))).stream().map(dictionary::getSynset).collect(Collectors.toSet());
-    }
-
-    /**
-     * Returns the set of ISynset nodes after applying the relation function.
-     * @param head ISynset node
-     * @param relation WordNet based ISynset Relation. Could be hypernym, hyponym etc.
-     * @return The set of ISynset nodes after applying the relation function.
-     */
-    private static Set<ISynset> getRelated(ISynset head, Pointer relation) {
-        return new HashSet<>(head.getRelatedMap().getOrDefault(relation, new ArrayList<>())).stream().map(dictionary::getSynset).collect(Collectors.toSet());
-    }
-
-    /**
-     * @param head ISynset node
-     * @return The meronyms of the ISynset node.
-     */
-    private static Set<ISynset> getMeronyms(ISynset head) {
-        Set<ISynsetID> partUnion = Sets.union(new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.MERONYM_MEMBER, new ArrayList<>())), new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.MERONYM_PART, new ArrayList<>())));
-        return Sets.union(partUnion, new HashSet<>(head.getRelatedMap().getOrDefault(Pointer.MERONYM_SUBSTANCE, new ArrayList<>()))).stream().map(dictionary::getSynset).collect(Collectors.toSet());
     }
 
     /**
@@ -772,16 +750,17 @@ public class AutograderMain {
 
                     Annotation document = new Annotation(essay.toString());
                     pipeline.annotate(document);
-                    int lengthScore = getLengthScore(document);// part (a)
-                    int spellScore = spellCheck(document);// part (b)
-                    int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document); // part (c i)
-                    int grammarScore = getGrammarScore(document);// part (c ii)
-                    int sentFormScore = getSentenceFormationScore(document);// part (c iii)
-                    int topicScore = getTopicRelevanceScore(document, nextRecord[1]);// part (d ii)
+//                    int lengthScore = getLengthScore(document);// part (a)
+//                    int spellScore = spellCheck(document);// part (b)
+//                    int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document); // part (c i)
+//                    int grammarScore = getGrammarScore(document);// part (c ii)
+//                    int sentFormScore = getSentenceFormationScore(document);// part (c iii)
+//                    int topicScore = getTopicRelevanceScore(document, nextRecord[1]);// part (d ii)
+                    int coherenceScore = getCoherenceScore(document);// part (d ii)
 
-                    System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + grammarScore + "\t" + sentFormScore + "\t" + 0 + "\t" + topicScore + "\t" + nextRecord[2]);
-
-                    csvWriter.writeNext(new String[]{nextRecord[0], String.valueOf(lengthScore), String.valueOf(spellScore), String.valueOf(subjVerbAgrmntScore), String.valueOf(grammarScore), String.valueOf(sentFormScore), String.valueOf(0), String.valueOf(topicScore), nextRecord[2]});// save features to file
+//                    System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + grammarScore + "\t" + sentFormScore + "\t" + 0 + "\t" + topicScore + "\t" + nextRecord[2]);
+//
+//                    csvWriter.writeNext(new String[]{nextRecord[0], String.valueOf(lengthScore), String.valueOf(spellScore), String.valueOf(subjVerbAgrmntScore), String.valueOf(grammarScore), String.valueOf(sentFormScore), String.valueOf(0), String.valueOf(topicScore), nextRecord[2]});// save features to file
                     essayReader.close();
 
                 }
@@ -825,6 +804,48 @@ public class AutograderMain {
         }
 
 
+    }
+
+    private static int getCoherenceScore(Annotation document) {
+        List<CoreMap> sentences = document.get(CoreAnnotations.SentencesAnnotation.class);
+        double negativeScore = 0;
+        for(CoreMap sentence : sentences) {
+            double penaltyCounter = 0;
+            CoreMap previous = null;
+            if(sentences.indexOf(sentence) >= 1) previous = sentences.get(sentences.indexOf(sentence) - 1);
+            List<CoreLabel> pronouns = findPronouns(sentence);
+            if(pronouns.isEmpty()) continue;
+            List<CoreLabel> forwardCentres = getForwardCentres(sentence);
+            List<CoreLabel> backwardCentres = getBackwardCentres( previous, sentence);
+            for (CoreLabel pronoun : pronouns) {
+                if(!resolved(pronoun, forwardCentres, backwardCentres)) {
+                    penaltyCounter++;
+                }
+                   negativeScore += penaltyCounter / pronouns.size();
+            }
+        }
+        return (int) (negativeScore / sentences.size());
+    }
+
+    private static boolean resolved(CoreLabel pronoun, List<CoreLabel> forwardCentres, List<CoreLabel> backwardCentres) {
+        return false;
+    }
+
+    private static List<CoreLabel> getBackwardCentres(CoreMap previous , CoreMap sentence) {
+        return null;
+    }
+
+    private static List<CoreLabel> getForwardCentres(CoreMap sentence) {
+        System.out.println();
+        return null;
+    }
+
+    private static List<CoreLabel> findPronouns(CoreMap sentence) {
+        List<String> personalPronouns = Arrays.asList("I", "ME", "YOU", "YOUR", "WE", "US", "MINE", "OUR", "MY");
+        return sentence.get(CoreAnnotations.TokensAnnotation.class).stream()
+                .filter(token -> token.get(CoreAnnotations.PartOfSpeechAnnotation.class).contains("PRP"))
+                .filter(pronoun -> !personalPronouns.contains(pronoun.get(CoreAnnotations.LemmaAnnotation.class).toUpperCase()))
+                .collect(Collectors.toList());
     }
 
     /**
