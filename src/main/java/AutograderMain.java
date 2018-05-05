@@ -520,7 +520,7 @@ public class AutograderMain {
 
         }
         double sentFormMistakes = (numWrongSents / (double) totalNumSents);// ratio of wrong sentences
-        List<Double> values = Arrays.asList(0.0, 0.418, 0.485, 0.660, 0.902);// thresholds based on mean and standard deviation
+        List<Double> values = Arrays.asList(0.0, 0.3, 0.485, 0.660, 0.902);// thresholds based on mean and standard deviation
         return 5 - findIntervalIndex(sentFormMistakes, values);// return 1-5 mapped score for correctness
     }
 
@@ -880,8 +880,8 @@ public class AutograderMain {
                 int sentFormScore = getSentenceFormationScore(document);// part (c iii)
 
                 int topicScore = getTopicRelevanceScore(document, nextRecord[1]);
-                double finalScore = 2.1429 * lengthScore - 0.8571 * spellScore - 0.1429 * subjVerbAgrmntScore * 0.2857 * grammarScore; // final score function
-                double intercept = 6.00;// intercept
+                double finalScore = 2.0009 * lengthScore - 0.7999 * spellScore + 0.0003 * subjVerbAgrmntScore + 0.6004 * grammarScore - 0.2005 * sentFormScore - 0.1982 * topicScore; // final score function
+                double intercept =  -6.01;// intercept
                 String finalGrade = (finalScore + intercept >= 1D) ? "high" : "low";
 
                 System.out.println(nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + sentFormScore + ";" + 0 + ";" + topicScore + ";" + (int) finalScore + ";" + finalGrade);
