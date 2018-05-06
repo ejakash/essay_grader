@@ -1,3 +1,5 @@
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import com.opencsv.*;
 import edu.mit.jwi.Dictionary;
 import edu.mit.jwi.IDictionary;
@@ -23,6 +25,7 @@ import weka.core.Instances;
 import weka.core.converters.CSVLoader;
 
 import java.io.*;
+import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.file.Files;
@@ -46,6 +49,7 @@ public class AutograderMain {
     private static List<String> sentStartConflictVerbs = Arrays.asList("VB", "VBN", "VBZ", "VBP", "VBD");
     private static List<String> tagsToExclude = Arrays.asList(",", ".", "``", "''", ":", "#", "", "--", "$", "-NONE-", "-LRB-", "-RRB-", "POS");
     private static Set<String> allTreebankRules = new HashSet<>();
+    private static List<String> personalPronouns = Arrays.asList("I", "ME", "YOU", "YOUR", "WE", "US", "MINE", "OUR", "MY");
 //    private static Map<String, Integer> allSeqMistakesFreq = new HashMap<>();
 //    private static Set<String> allSeqMistakes = new HashSet<>();
 
@@ -387,9 +391,9 @@ public class AutograderMain {
                 }
             }
         }
-        double subjVerbPercent = (1 - (((double) mistakeCount) / docTokenList.size())) * 100;// get the subject-verb correctness ratio
-        List<Double> values = Arrays.asList(0.0, 97.70, 98.71, 99.28, 99.78);// thresholds based on mean and standard deviation
-        return findIntervalIndex(subjVerbPercent, values) + 1;// return 1-5 mapped score
+        double subjVerbPercent = (((double) mistakeCount) / document.get(CoreAnnotations.SentencesAnnotation.class).size());// get the subject-verb correctness ratio
+        List<Double> values = Arrays.asList(0.0, 0.14, 0.25, 0.35, 0.58);// thresholds based on mean and standard deviation
+        return 5 - findIntervalIndex(subjVerbPercent, values);// return 1-5 mapped score
     }
 
     /**
@@ -413,9 +417,9 @@ public class AutograderMain {
                 }
             }
         }
-
-        extractAllParentChildSeqs(child, allParentChildren);// extract all parent child sequences <Ex:S,NP,VP>
-
+        if (isValidSentFormNode(child)) {// check if node is valid for rules check (that was not covered in FRAG, X, SBAR checks)
+            extractAllParentChildSeqs(child, allParentChildren);// extract all parent child sequences <Ex:S,NP,VP>
+        }
         for (Tree each : child.children()) {
             traverseParseTree(each, root, sfAttrCountsMap, allParentChildren);// recurse through tree
         }
@@ -429,17 +433,17 @@ public class AutograderMain {
      * @param allParentChildren all parent children sequences
      */
     private static void extractAllParentChildSeqs(Tree child, Set<String> allParentChildren) {
-        if (isValidSentFormNode(child)) {// check if node is valid for rules check (that was not covered in FRAG, X, SBAR checks)
-            StringBuilder pcr = new StringBuilder();
-            List<String> children = child.getChildrenAsList().stream().filter(c -> isValidTag(c.label().value())).map(c -> c.label().value()).collect(Collectors.toList());// get children as list
-            if (children.size() > 0) {
-                pcr.append(child.label().value().split("-")[0]).append(",");// append the parent
-                String s = children.stream().reduce((catStr1, catStr2) -> catStr1.split("-")[0] + "," + catStr2.split("-")[0]).get();// all children as concatenated string, separated by comma
-                pcr.append(s);
-                allParentChildren.add(pcr.toString());// add to the set
-            }
+
+        StringBuilder pcr = new StringBuilder();
+        List<String> children = child.getChildrenAsList().stream().filter(c -> isValidTag(c.label().value())).map(c -> c.label().value()).collect(Collectors.toList());// get children as list
+        if (children.size() > 0) {
+            pcr.append(child.label().value().split("-")[0]).append(",");// append the parent
+            String s = children.stream().reduce((catStr1, catStr2) -> catStr1.split("-")[0] + "," + catStr2.split("-")[0]).get();// all children as concatenated string, separated by comma
+            pcr.append(s);
+            allParentChildren.add(pcr.toString());// add to the set
         }
     }
+
 
     /**
      * check if constituent tag is ignorable
@@ -555,8 +559,9 @@ public class AutograderMain {
      * Compute the score for each word in the document.
      * Score is computed for a pair of words one from document and one from topic. The highest score is assigned to the document word.
      * Top 80% of these scores are take and are averaged and rounded to generate the final score of the document.
+     *
      * @param document The input Document
-     * @param topic The topic of the document
+     * @param topic    The topic of the document
      * @return The Score value for topic relevancy of the document.
      * @throws IOException In case the word net dictionary cannot be opened.
      */
@@ -581,7 +586,8 @@ public class AutograderMain {
      * Computes the possible hyperTrees (defined below) of the word. Topic hyperTrees are passes to avoid recalculation at each step
      * Take all pair of hyperTrees one from word hyper trees and one from topic hyperTrees and compute the similarity score.
      * return the highest value.
-     * @param word word from the document
+     *
+     * @param word            word from the document
      * @param topicHyperTrees linked list of a set of hyponyms from Entity (WordNet root node) to the topic word.
      *                        example ->  entity < physical_entity < object < whole < living_thing < organism < animal< domestic_animal < dog
      * @return Similarity score for the particular word.
@@ -595,7 +601,7 @@ public class AutograderMain {
     }
 
     /**
-     * @param wordTree Word hyperTree. HyperTree have been defined above.
+     * @param wordTree  Word hyperTree. HyperTree have been defined above.
      * @param topicTree Topic hyperTree. HyperTree have been defined above.
      * @return similarity score between the hyperTrees.
      */
@@ -620,7 +626,8 @@ public class AutograderMain {
     /**
      * This function is currently used to find the hyperTrees (Defined above). If a word is input, it is converted to synset first.
      * Then the expansion function  applied on the synset and the new synsets are added expansion function is called on then recursively.
-     * @param word word to be expanded
+     *
+     * @param word             word to be expanded
      * @param relationFunction expansion function. It could be hypernym expansion, meronym expansion or any other synset based expansion.
      * @return All possible trees with expansion function applied on the synset of the word.
      */
@@ -639,7 +646,8 @@ public class AutograderMain {
      * with each ISynset attached to the given ISynset in each respective list. Then the expansion function is recursively
      * called on each of these new ISynset expanding the lists even further. Once all the lists reach a terminal node
      * all these lists are returned.
-     * @param word ISynset of the word to be expanded.
+     *
+     * @param word             ISynset of the word to be expanded.
      * @param relationFunction expansion function. It could be hypernym expansion, meronym expansion or any other synset based expansion.
      * @return All possible trees with expansion function applied on the synset of the word.
      */
@@ -661,6 +669,7 @@ public class AutograderMain {
 
     /**
      * Return the wordNet based hypernyms of ISynset node.
+     *
      * @param head ISynset node
      * @return The hypernyms of the ISynset node.
      */
@@ -670,7 +679,8 @@ public class AutograderMain {
 
     /**
      * It takes the tokens of the document and applies a noun filter, stopWord filter and wordNet lookup filter to avoid mis-spelt words.
-     * @param document The document after its annotated by Stanford NLP
+     *
+     * @param document     The document after its annotated by Stanford NLP
      * @param shouldRepeat If Should Repeat, returns a list. Else a set.
      * @return Return a collection of nouns in the documents.
      */
@@ -685,6 +695,7 @@ public class AutograderMain {
 
     /**
      * Run stanford NLP tool and return the annotation with POS and lemmatization processed.
+     *
      * @param topic The topic to the processed
      * @return processed topic Annotation.
      */
@@ -750,17 +761,16 @@ public class AutograderMain {
 
                     Annotation document = new Annotation(essay.toString());
                     pipeline.annotate(document);
-//                    int lengthScore = getLengthScore(document);// part (a)
-//                    int spellScore = spellCheck(document);// part (b)
-//                    int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document); // part (c i)
-//                    int grammarScore = getGrammarScore(document);// part (c ii)
-//                    int sentFormScore = getSentenceFormationScore(document);// part (c iii)
-//                    int topicScore = getTopicRelevanceScore(document, nextRecord[1]);// part (d ii)
-                    int coherenceScore = getCoherenceScore(document);// part (d ii)
+                    int lengthScore = getLengthScore(document);// part (a)
+                    int spellScore = spellCheck(document);// part (b)
+                    int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document); // part (c i)
+                    int grammarScore = getGrammarScore(document);// part (c ii)
+                    int sentFormScore = getSentenceFormationScore(document);// part (c iii)
+                    int coherenceScore = getCoherenceScore(document);// part (d i)
+                    int topicScore = getTopicRelevanceScore(document, nextRecord[1]);// part (d ii)
+                    System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + grammarScore + "\t" + sentFormScore + "\t" + coherenceScore + "\t" + topicScore + "\t" + nextRecord[2]);
 
-//                    System.out.println(nextRecord[0] + "\t" + lengthScore + "\t" + spellScore + "\t" + subjVerbAgrmntScore + "\t" + grammarScore + "\t" + sentFormScore + "\t" + 0 + "\t" + topicScore + "\t" + nextRecord[2]);
-//
-//                    csvWriter.writeNext(new String[]{nextRecord[0], String.valueOf(lengthScore), String.valueOf(spellScore), String.valueOf(subjVerbAgrmntScore), String.valueOf(grammarScore), String.valueOf(sentFormScore), String.valueOf(0), String.valueOf(topicScore), nextRecord[2]});// save features to file
+                    csvWriter.writeNext(new String[]{nextRecord[0], String.valueOf(lengthScore), String.valueOf(spellScore), String.valueOf(subjVerbAgrmntScore), String.valueOf(grammarScore), String.valueOf(sentFormScore), String.valueOf(coherenceScore), String.valueOf(topicScore), nextRecord[2]});// save features to file
                     essayReader.close();
 
                 }
@@ -806,46 +816,367 @@ public class AutograderMain {
 
     }
 
-    private static int getCoherenceScore(Annotation document) {
+    /**
+     * get the text coherence score using centering algorithm
+     *
+     * @param document input document
+     * @return score
+     */
+    static int getCoherenceScore(Annotation document) {
         List<CoreMap> sentences = document.get(CoreAnnotations.SentencesAnnotation.class);
         double negativeScore = 0;
-        for(CoreMap sentence : sentences) {
+        List<CoreLabel> prevForwardCenters = new ArrayList<>();
+        CoreLabel prevBackwardCenter = null;
+        for (CoreMap sentence : sentences) {
             double penaltyCounter = 0;
-            CoreMap previous = null;
-            if(sentences.indexOf(sentence) >= 1) previous = sentences.get(sentences.indexOf(sentence) - 1);
             List<CoreLabel> pronouns = findPronouns(sentence);
-            if(pronouns.isEmpty()) continue;
-            List<CoreLabel> forwardCentres = getForwardCentres(sentence);
-            List<CoreLabel> backwardCentres = getBackwardCentres( previous, sentence);
+            if (pronouns.isEmpty()) continue;
+            List<CoreLabel> currForwardCenters = getForwardCenters(sentence);
+            CoreLabel currBackwardCenter = getBackwardCenter(prevForwardCenters);
             for (CoreLabel pronoun : pronouns) {
-                if(!resolved(pronoun, forwardCentres, backwardCentres)) {
+                if (!resolved(pronoun, currForwardCenters, prevBackwardCenter)) {
                     penaltyCounter++;
                 }
-                   negativeScore += penaltyCounter / pronouns.size();
+                negativeScore += penaltyCounter / pronouns.size();
+            }
+            prevForwardCenters = currForwardCenters;
+            prevBackwardCenter = currBackwardCenter;
+        }
+        double normalizedScore = negativeScore / sentences.size();
+        List<Double> values = Arrays.asList(0D, 0.31, 0.47, 0.539, 0.72);// thresholds based on mean and standard deviation
+        return 5 - findIntervalIndex(normalizedScore, values);// 5 minus is done since we return correctness score and normalized score is wrongness score.
+    }
+
+    /**
+     * check if the reference can be resolved
+     *
+     * @param pronoun pronoun reference
+     * @param currForwardCenters current utterance forward centers
+     * @param prevBackwardCenter previous utterance backward center
+     * @return boolean
+     */
+    private static boolean resolved(CoreLabel pronoun, List<CoreLabel> currForwardCenters, CoreLabel prevBackwardCenter) {
+        List<Map<String, Object>> transitionsList = currForwardCenters
+                .stream()
+                .map(x -> getTransitionMap(pronoun, x, currForwardCenters, prevBackwardCenter))
+                .filter(x -> x.get("TRANSITION") != null)
+                .collect(Collectors.toList());
+
+
+        return !transitionsList.isEmpty();
+    }
+
+    private static int getCenterDistance(CoreLabel pronoun, CoreLabel center) {
+        return Math.abs(pronoun.index() - center.index());
+    }
+
+    /**
+     * get the transition map for each pronoun
+     *
+     * @param pronoun pronoun reference
+     * @param x antecedent
+     * @param currForwardCenters current utterance forward centers
+     * @param prevBackwardCenter previous utterance backward center
+     * @return transition map
+     */
+    private static Map<String, Object> getTransitionMap(CoreLabel pronoun, CoreLabel x, List<CoreLabel> currForwardCenters, CoreLabel prevBackwardCenter) {
+        Map<String, Object> transitionMap = new HashMap<>();
+        transitionMap.put("PRONOUN", pronoun);
+        transitionMap.put("CENTER", x);
+        transitionMap.put("TRANSITION", getTransition(pronoun, x, currForwardCenters, prevBackwardCenter));
+        transitionMap.put("DISTANCE", getCenterDistance(pronoun, x));
+        return transitionMap;
+
+    }
+
+    /**
+     * get the transition CONTINUE, RETAIN, SMOOTH or ROUGH
+     *
+     * @param pronoun pronoun reference
+     * @param x antecedent
+     * @param currForwardCenters current utterance forward centers
+     * @param prevBackwardCenter previous utterance backward center
+     * @return transition
+     */
+    private static String getTransition(CoreLabel pronoun, CoreLabel x, List<CoreLabel> currForwardCenters, CoreLabel prevBackwardCenter) {
+        if (!isSyntaxCompatible(pronoun, x)) {
+            return null;
+        }
+        if (isPreviousBackwardCenter(prevBackwardCenter, x)) {
+            if (isPreferredCenter(currForwardCenters, x)) {
+                return "CONTINUE";
+            }
+            return "RETAIN";
+        } else {
+            if (isPreferredCenter(currForwardCenters, x)) {
+                return "SMOOTH";
+            }
+            return "ROUGH";
+        }
+    }
+
+    /**
+     * check if center is preferred center
+     *
+     * @param currForwardCenters current utterance forward centers
+     * @param x antecedent
+     * @return boolean
+     */
+    private static boolean isPreferredCenter(List<CoreLabel> currForwardCenters, CoreLabel x) {
+        return !currForwardCenters.isEmpty() && currForwardCenters.get(0).word().equals(x.word());
+    }
+
+    /**
+     * check if center is equal to previous backward center
+     *
+     * @param prevBackwardCenter previous utterance backward center
+     * @param x antecedent
+     * @return boolean
+     */
+    private static boolean isPreviousBackwardCenter(CoreLabel prevBackwardCenter, CoreLabel x) {
+        return prevBackwardCenter == null || prevBackwardCenter == x;
+    }
+
+    /**
+     * apply syntactic constraints to eliminate invalid transitions
+     *
+     * @param pronoun pronoun reference
+     * @param x antecedent
+     * @return boolean
+     */
+    private static boolean isSyntaxCompatible(CoreLabel pronoun, CoreLabel x) {
+        if (pronoun == null || x == null)
+            return false;
+        if (x.index() > pronoun.index())
+            return false;
+        if (pronoun.sentIndex() - x.sentIndex() > 2 || pronoun.sentIndex() - x.sentIndex() < 0)
+            return false;
+        if (Arrays.asList("she", "her", "he", "him").contains(pronoun.word().toLowerCase())) {
+            if (!getGender(pronoun.word()).equals(getGender(x.word()))) {
+                return false;
             }
         }
-        return (int) (negativeScore / sentences.size());
+        return isPlural(pronoun.word()) == isPlural(x.word()) && !x.tag().contains("PRP");
+
     }
 
-    private static boolean resolved(CoreLabel pronoun, List<CoreLabel> forwardCentres, List<CoreLabel> backwardCentres) {
-        return false;
+    /**
+     * check if word is plural
+     *
+     * @param word word
+     * @return boolean
+     */
+    private static boolean isPlural(String word) {
+        return Arrays.asList("they", "them", "people").contains(word.toLowerCase()) || !Arrays.asList("it", "he", "she", "her", "him").contains(word.toLowerCase());
     }
 
-    private static List<CoreLabel> getBackwardCentres(CoreMap previous , CoreMap sentence) {
+    /**
+     * get the probable gender of a word
+     *
+     * @param word word
+     * @return boolean
+     */
+    static String getGender(String word) {
+        String url = "https://api.genderize.io/?name=" + word;
+        String gender = "";
+        try {
+            URL obj = new URL(url);
+            HttpURLConnection con = (HttpURLConnection) obj.openConnection();
+            con.setRequestMethod("GET");
+            int responseCode = con.getResponseCode();
+
+            if (responseCode == 200) {
+                BufferedReader in = new BufferedReader(
+                        new InputStreamReader(con.getInputStream()));
+                String inputLine;
+                StringBuilder response = new StringBuilder();
+                while ((inputLine = in.readLine()) != null) {
+                    response.append(inputLine);
+                }
+                Gson gson = new Gson();
+                Map<String, String> jsonMap = gson.fromJson(response.toString(), new TypeToken<HashMap<String, String>>() {
+                }.getType());
+                if (jsonMap.get("gender") != null)
+                    gender = jsonMap.get("gender");
+                in.close();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return gender;
+    }
+
+    /**
+     * get the backward center from previous previous forward centers
+     *
+     * @param prevForwardCenters previous forward centers
+     * @return backward center
+     */
+    private static CoreLabel getBackwardCenter(List<CoreLabel> prevForwardCenters) {
+        if (!prevForwardCenters.isEmpty()) {
+            return prevForwardCenters.get(0);
+        }
         return null;
     }
 
-    private static List<CoreLabel> getForwardCentres(CoreMap sentence) {
-        System.out.println();
-        return null;
+    /**
+     * get forward centers by extracting subject, existential predicate nominal,
+     * direct object, indirect object and demarcate adverbial PP
+     *
+     * @param sentence sentence
+     * @return list of forward centers
+     */
+    private static List<CoreLabel> getForwardCenters(CoreMap sentence) {
+        List<CoreLabel> fwdCenters = new ArrayList<>();
+        SemanticGraph dependencyParse = sentence.get(SemanticGraphCoreAnnotations.EnhancedPlusPlusDependenciesAnnotation.class);// get dependency graph
+        Tree tree = sentence.get(TreeCoreAnnotations.TreeAnnotation.class);// get the constituent parse tree
+        fwdCenters.addAll(getSubjects(dependencyParse));
+        fwdCenters.addAll(getExistentialPredicateNominals(tree));
+        fwdCenters.addAll(getDirectObjects(dependencyParse));
+        fwdCenters.addAll(getIndirectObjects(dependencyParse));
+        fwdCenters.addAll(getPrepNouns(tree));
+        return fwdCenters;
     }
 
+    /**
+     * get the noun in PP
+     *
+     * @param root root of tree
+     * @return list of prepositional  nouns
+     */
+    private static List<CoreLabel> getPrepNouns(Tree root) {
+        List<CoreLabel> prepNouns = new ArrayList<>();
+        Stack<Tree> treeStack = new Stack<>();
+        treeStack.push(root);
+        while (!treeStack.empty()) {
+            Tree parent = treeStack.pop();
+            if (!parent.isLeaf() && parent.value().equals("PP") && hasNoun(parent)) {
+                prepNouns.addAll(getNoun(parent));
+            }
+            List<Tree> children = parent.getChildrenAsList();
+            for (Tree child : children) {
+                treeStack.push(child);
+            }
+        }
+        return prepNouns;
+    }
+
+    /**
+     * check if tree has a noun
+     *
+     * @param root root of tree
+     * @return boolean
+     */
+    private static boolean hasNoun(Tree root) {
+        return root.getLeaves().stream().anyMatch(l -> l.parent(root).value().equals("NN"));
+    }
+
+    /**
+     * get the indirect object
+     *
+     * @param dependencyParse dependency parse graph
+     * @return list of indirect objects
+     */
+    private static List<CoreLabel> getIndirectObjects(SemanticGraph dependencyParse) {
+        return dependencyParse.typedDependencies().stream().filter(t -> t.reln().toString().equals("iobj")).map(t -> t.dep().backingLabel()).collect(Collectors.toList());
+    }
+
+    /**
+     * get the direct object
+     *
+     * @param dependencyParse dependency parse graph
+     * @return list of direct objects
+     */
+    private static List<CoreLabel> getDirectObjects(SemanticGraph dependencyParse) {
+        return dependencyParse.typedDependencies().stream().filter(t -> t.reln().toString().equals("dobj")).map(t -> t.dep().backingLabel()).collect(Collectors.toList());
+    }
+
+    /**
+     * get the existential predicate nominals
+     *
+     * @param root root of the tree
+     * @return list of existential predicate nominals
+     */
+    private static List<CoreLabel> getExistentialPredicateNominals(Tree root) {
+        List<CoreLabel> exPredNoms = new ArrayList<>();
+        Stack<Tree> treeStack = new Stack<>();
+        treeStack.push(root);
+        while (!treeStack.empty()) {
+            Tree parent = treeStack.pop();
+            if (!parent.isLeaf() && parent.value().equals("NP") && hasExistential(parent)) {
+                exPredNoms.addAll(getNoun(parent));
+            }
+            List<Tree> children = parent.getChildrenAsList();
+            for (Tree child : children) {
+                treeStack.push(child);
+            }
+        }
+        return exPredNoms;
+    }
+
+    /**
+     * get the noun in a tree
+     *
+     * @param root root of the tree
+     * @return list of nouns
+     */
+    private static List<CoreLabel> getNoun(Tree root) {
+        return root.getLeaves().stream().filter(l -> Arrays.asList("NN", "NNS").contains(l.parent(root).value())).map(l -> (CoreLabel) l.label()).collect(Collectors.toList());
+    }
+
+    /**
+     * check if a tree has existential
+     *
+     * @param root root of the tree
+     * @return boolean
+     */
+    private static boolean hasExistential(Tree root) {
+        return root.getLeaves().stream().anyMatch(l -> l.parent(root).value().equals("DT") && l.value().toLowerCase().equals("there"));
+
+    }
+
+    /**
+     * get the subject
+     *
+     * @param dependencyParse dependency parse graph
+     * @return list of subjects
+     */
+    static List<CoreLabel> getSubjects(SemanticGraph dependencyParse) {
+        return dependencyParse.typedDependencies().stream().filter(AutograderMain::isCenteringSubject).map(t -> t.dep().backingLabel()).collect(Collectors.toList());
+
+
+    }
+
+    /**
+     * check if subject is valid for centering
+     *
+     * @param t typed dependency
+     * @return boolean
+     */
+    private static boolean isCenteringSubject(TypedDependency t) {
+        return t.reln().toString().equals("nsubj") && !t.dep().tag().equals("JJ") && !isPronoun(t.dep().backingLabel());
+    }
+
+    /**
+     * find all pronouns
+     *
+     * @param sentence sentence
+     * @return list of pronouns
+     */
     private static List<CoreLabel> findPronouns(CoreMap sentence) {
-        List<String> personalPronouns = Arrays.asList("I", "ME", "YOU", "YOUR", "WE", "US", "MINE", "OUR", "MY");
         return sentence.get(CoreAnnotations.TokensAnnotation.class).stream()
-                .filter(token -> token.get(CoreAnnotations.PartOfSpeechAnnotation.class).contains("PRP"))
-                .filter(pronoun -> !personalPronouns.contains(pronoun.get(CoreAnnotations.LemmaAnnotation.class).toUpperCase()))
+                .filter(AutograderMain::isPronoun)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * check if word is pronoun
+     *
+     * @param pronoun pronoun reference
+     * @return boolean
+     */
+    private static boolean isPronoun(CoreLabel pronoun) {
+        return pronoun.get(CoreAnnotations.PartOfSpeechAnnotation.class).contains("PRP") && !personalPronouns.contains(pronoun.get(CoreAnnotations.LemmaAnnotation.class).toUpperCase());
     }
 
     /**
@@ -865,8 +1196,6 @@ public class AutograderMain {
 
         return dataset;
     }
-
-    //TODO update function, grade
 
     /**
      * test grader
@@ -896,17 +1225,17 @@ public class AutograderMain {
                 pipeline.annotate(document);
                 int lengthScore = getLengthScore(document);// part (a)
                 int spellScore = spellCheck(document);// part (b)
-                int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);// part (c i)
+                double subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);// part (c i)
                 int grammarScore = getGrammarScore(document);// part (c ii)
                 int sentFormScore = getSentenceFormationScore(document);// part (c iii)
-
-                int topicScore = getTopicRelevanceScore(document, nextRecord[1]);
-                double finalScore = 2.0009 * lengthScore - 0.7999 * spellScore + 0.0003 * subjVerbAgrmntScore + 0.6004 * grammarScore - 0.2005 * sentFormScore - 0.1982 * topicScore; // final score function
-                double intercept =  -6.01;// intercept
+                int coherenceScore = getCoherenceScore(document);// part (d i)
+                int topicScore = getTopicRelevanceScore(document, nextRecord[1]);// part (d ii)
+                double finalScore = 1.8721 * lengthScore - 0.6243 * spellScore + 0.1266 * subjVerbAgrmntScore + 0.4999 * grammarScore - 0.2504 * sentFormScore + 0.125 * coherenceScore - 0.2533 * topicScore; // final score function
+                double intercept = -6.3601;// intercept
                 String finalGrade = (finalScore + intercept >= 1D) ? "high" : "low";
 
-                System.out.println(nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + sentFormScore + ";" + 0 + ";" + topicScore + ";" + (int) finalScore + ";" + finalGrade);
-                String scoreDetails = nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + sentFormScore + ";" + 0 + ";" + topicScore + ";" + (int) finalScore + ";" + finalGrade + "\n";
+                System.out.println(nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + sentFormScore + ";" + coherenceScore + ";" + topicScore + ";" + (int) finalScore + ";" + finalGrade);
+                String scoreDetails = nextRecord[0] + ";" + lengthScore + ";" + spellScore + ";" + subjVerbAgrmntScore + ";" + grammarScore + ";" + sentFormScore + ";" + coherenceScore + ";" + topicScore + ";" + (int) finalScore + ";" + finalGrade + "\n";
                 writer.write(scoreDetails);
                 essayReader.close();
             }
