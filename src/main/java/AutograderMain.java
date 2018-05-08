@@ -1225,7 +1225,7 @@ public class AutograderMain {
                 pipeline.annotate(document);
                 int lengthScore = getLengthScore(document);// part (a)
                 int spellScore = spellCheck(document);// part (b)
-                double subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);// part (c i)
+                int subjVerbAgrmntScore = getSubjectVerbAgrmntScore(document);// part (c i)
                 int grammarScore = getGrammarScore(document);// part (c ii)
                 int sentFormScore = getSentenceFormationScore(document);// part (c iii)
                 int coherenceScore = getCoherenceScore(document);// part (d i)
